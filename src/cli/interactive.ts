@@ -60,9 +60,9 @@ export class InteractiveMode {
     const config = configManager.getConfig();
     const provider = configManager.getActiveProvider();
     if (!provider.apiKey && !process.env[`${provider.type.toUpperCase()}_API_KEY`]) {
-      console.log(chalk.yellow(`\n⚠ No API key configured for ${provider.name}`));
-      console.log(chalk.gray(`  Set ${provider.type.toUpperCase()}_API_KEY environment variable`));
-      console.log(chalk.gray('  Or use /provider <name> to switch to a configured provider'));
+      tui.printLine(chalk.yellow(`\n⚠ No API key configured for ${provider.name}`));
+      tui.printLine(chalk.gray(`  Set ${provider.type.toUpperCase()}_API_KEY environment variable`));
+      tui.printLine(chalk.gray('  Or use /provider <name> to switch to a configured provider'));
     }
   }
 

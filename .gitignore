@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+*.log
+.ys/sessions/
+.ys/backups/
+.ys/trash/
+.ys/exports/
+~/.ys/

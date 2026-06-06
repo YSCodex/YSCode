@@ -136,6 +136,15 @@ export function getLanguageFromExtension(ext: string): string {
   return langMap[ext.toLowerCase()] || 'plaintext';
 }
 
+export function safeRepeat(char: string, count: number): string {
+  return count > 0 ? char.repeat(count) : '';
+}
+
+export function safePadEnd(str: string, targetLength: number, fill: string = ' '): string {
+  const needed = Math.max(0, targetLength - str.length);
+  return str + (needed > 0 ? fill.repeat(needed) : '');
+}
+
 export function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

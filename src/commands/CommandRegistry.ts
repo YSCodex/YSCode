@@ -850,8 +850,8 @@ function approvalBadge(m: ApprovalMode): string {
 }
 
 function getProgressBar(pct: number, width: number): string {
-  const filled = Math.round((pct / 100) * width);
-  const empty = width - filled;
+  const filled = Math.max(0, Math.min(Math.round((pct / 100) * width), width));
+  const empty = Math.max(0, width - filled);
   const fillChar = '█';
   const emptyChar = '░';
   const color = pct > 80 ? chalk.red : pct > 50 ? chalk.yellow : chalk.green;

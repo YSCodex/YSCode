@@ -94,8 +94,6 @@ export class TUI {
 
   start(): void {
     this.running = true;
-    this.clear();
-    this.printWelcome();
     this.showPrompt();
     this.startKeyListener();
   }
@@ -517,14 +515,14 @@ export class TUI {
 
   printHelp(): void {
     const { ALL_COMMANDS } = require('./CommandPopup.js');
-    const w = Math.min(process.stdout.columns || 80, 72);
+    const w = Math.max(Math.min(process.stdout.columns || 80, 72), 30);
     const top = `╔${'═'.repeat(w)}╗`;
     const bottom = `╚${'═'.repeat(w)}╝`;
 
     const lines: string[] = [top];
     const title = ` YS Code Agent — Commands `;
-    const titlePad = Math.floor((w - title.length) / 2);
-    lines.push(`║${' '.repeat(titlePad)}${chalk.cyan(title)}${' '.repeat(w - titlePad - title.length)}║`);
+    const titlePad = Math.max(0, Math.floor((w - title.length) / 2));
+    lines.push(`║${' '.repeat(titlePad)}${chalk.cyan(title)}${' '.repeat(Math.max(0, w - titlePad - title.length))}║`);
     lines.push(`╠${'═'.repeat(w)}╣`);
 
     const categories: Record<string, CommandEntry[]> = {};
@@ -572,7 +570,7 @@ export class TUI {
   }
 
   printWarning(message: string): void {
-    const w = Math.min(process.stdout.columns || 80, 60);
+    const w = Math.max(Math.min(process.stdout.columns || 80, 60), 10);
     const top = `╔${'═'.repeat(w)}╗`;
     const bottom = `╚${'═'.repeat(w)}╝`;
     this.printLine('');
@@ -681,7 +679,7 @@ export class TUI {
   }
 
   printError(error: string): void {
-    const w = Math.min(process.stdout.columns || 80, 56);
+    const w = Math.max(Math.min(process.stdout.columns || 80, 56), 10);
     const top = `╔${'═'.repeat(w)}╗`;
     const bottom = `╚${'═'.repeat(w)}╝`;
     this.printLine('');
@@ -729,7 +727,7 @@ export class TUI {
   }
 
   private showShutdownScreen(): void {
-    const w = Math.min(process.stdout.columns || 80, 50);
+    const w = Math.max(Math.min(process.stdout.columns || 80, 50), 30);
     const top = `╭${'─'.repeat(w)}╮`;
     const bottom = `╰${'─'.repeat(w)}╯`;
 
@@ -737,8 +735,8 @@ export class TUI {
     console.log(chalk.cyan(top));
     console.log(`│${' '.repeat(w)}│`);
     const titleLine = '  ◆ YS Code Agent — Session Complete  ';
-    const titlePad = Math.floor((w - titleLine.length) / 2);
-    console.log(`│${' '.repeat(titlePad)}${chalk.cyan(titleLine)}${' '.repeat(w - titlePad - titleLine.length)}│`);
+    const titlePad = Math.max(0, Math.floor((w - titleLine.length) / 2));
+    console.log(`│${' '.repeat(titlePad)}${chalk.cyan(titleLine)}${' '.repeat(Math.max(0, w - titlePad - titleLine.length))}│`);
     console.log(`│${' '.repeat(w)}│`);
 
     const { sessionManager } = require('../session/index.js');

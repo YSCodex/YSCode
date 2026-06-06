@@ -11,11 +11,11 @@ export const phoneConfig = {
   },
 
   get terminalWidth(): number {
-    return process.stdout.columns ?? 80;
+    return Math.max(process.stdout.columns ?? 80, 20);
   },
 
   get terminalHeight(): number {
-    return process.stdout.rows ?? 24;
+    return Math.max(process.stdout.rows ?? 24, 10);
   },
 
   get isNarrow(): boolean {
@@ -48,7 +48,9 @@ export const phoneConfig = {
   },
 
   getWelcomeBoxWidth(): number {
-    return Math.min(this.terminalWidth - 4, 56);
+    const raw = this.terminalWidth - 4;
+    const clamped = Math.min(raw, 56);
+    return Math.max(clamped, 20);
   },
 
   getPopupHeight(): number {
@@ -62,6 +64,6 @@ export const phoneConfig = {
   },
 
   showCompactWelcome(): boolean {
-    return this.isNarrow || this.terminalWidth < 50;
+    return this.terminalWidth < 60;
   },
 };

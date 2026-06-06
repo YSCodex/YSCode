@@ -12,6 +12,12 @@ const LOG_LEVELS: Record<LogLevel, number> = {
   error: 3,
 };
 
+let consoleSuppressed = true;
+
+export function setConsoleSuppressed(v: boolean): void {
+  consoleSuppressed = v;
+}
+
 export class Logger {
   private level: LogLevel;
   private filePath: string;
@@ -118,7 +124,7 @@ export class Logger {
       data,
     };
 
-    if (this.consoleOutput) {
+    if (this.consoleOutput && !consoleSuppressed) {
       const formatted = this.formatLog(entry);
       switch (level) {
         case 'error':
@@ -210,6 +216,12 @@ function renameSync(oldPath: string, newPath: string): void {
     const { renameSync: fsRename } = require('fs');
     fsRename(oldPath, newPath);
   } catch {
+  }
+}
+
+export function setAllLevels(level: LogLevel): void {
+  for (const logger of loggers.values()) {
+    logger.setLevel(level);
   }
 }
 

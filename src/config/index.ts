@@ -158,7 +158,7 @@ const DEFAULT_CONFIG: Config = {
     summarizationThreshold: 50,
   },
   logging: {
-    level: 'info',
+    level: 'warn',
     file: join(homedir(), '.ys-code-agent', 'logs', 'agent.log'),
     maxSize: 10485760,
     maxFiles: 5,

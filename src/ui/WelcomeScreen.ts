@@ -4,6 +4,14 @@ import { phoneConfig } from './phoneOptimizer.js';
 
 let animateState = 0;
 
+function safeLen(s: string): number {
+  return s.replace(/\x1b\[[0-9;]*m/g, '').length;
+}
+
+function safeRepeat(n: number): string {
+  return n > 0 ? ' '.repeat(n) : '';
+}
+
 export function generateWelcome(): string {
   if (phoneConfig.showCompactWelcome()) {
     return generateCompactWelcome();
@@ -26,12 +34,13 @@ function generateFullWelcome(): string {
   const lines: string[] = [top];
 
   const titleRaw = `  ${diamond} YS CODE AGENT ${diamond}  `;
-  const titlePad = Math.floor((w - titleRaw.length) / 2);
-  lines.push(`║${' '.repeat(titlePad)}${chalk.cyan(titleRaw)}${' '.repeat(w - titlePad - titleRaw.length)}║`);
+  const titleStyled = chalk.cyan(titleRaw);
+  const titlePad = Math.floor((w - safeLen(titleStyled)) / 2);
+  lines.push(`║${safeRepeat(titlePad)}${titleStyled}${safeRepeat(w - titlePad - safeLen(titleStyled))}║`);
 
   const subtitle = chalk.gray('AI-Powered Terminal Coding Assistant');
-  const subPad = Math.floor((w - subtitle.length) / 2);
-  lines.push(`║${' '.repeat(subPad)}${subtitle}${' '.repeat(w - subPad - subtitle.length)}║`);
+  const subPad = Math.floor((w - safeLen(subtitle)) / 2);
+  lines.push(`║${safeRepeat(subPad)}${subtitle}${safeRepeat(w - subPad - safeLen(subtitle))}║`);
 
   lines.push(`╠${'═'.repeat(w)}╣`);
 
@@ -46,7 +55,7 @@ function generateFullWelcome(): string {
   for (const [label1, val1, label2, val2] of rows) {
     const part1 = `║  ${chalk.white(label1)}: ${val1}`;
     const part2 = `${chalk.white(label2)}: ${val2}`;
-    const spacing = w - part1.length - part2.length - 1;
+    const spacing = w - safeLen(part1) - safeLen(part2) - 1;
     const spaceStr = spacing > 0 ? ' '.repeat(spacing) : '  ';
     lines.push(`${part1}${spaceStr}${part2} ${chalk.gray('│')}`);
   }
@@ -54,11 +63,11 @@ function generateFullWelcome(): string {
   lines.push(`╠${'═'.repeat(w)}╣`);
 
   const tipLine = `  ${chalk.gray('Type')} ${chalk.cyan('/')}${chalk.gray(' for commands')}  ${chalk.gray('|')}  ${chalk.cyan('?')}${chalk.gray(' for shortcuts')}`;
-  const tipPad = Math.floor((w - tipLine.length) / 2);
-  lines.push(`║${' '.repeat(tipPad)}${tipLine}${' '.repeat(w - tipPad - tipLine.length)}║`);
+  const tipPad = Math.floor((w - safeLen(tipLine)) / 2);
+  lines.push(`║${safeRepeat(tipPad)}${tipLine}${safeRepeat(w - tipPad - safeLen(tipLine))}║`);
 
   const projectLine = getProjectLine(w);
-  lines.push(`║${projectLine}${' '.repeat(w - projectLine.length)}║`);
+  lines.push(`║${projectLine}${safeRepeat(w - safeLen(projectLine))}║`);
 
   lines.push(bottom);
   return lines.join('\n');
@@ -74,11 +83,11 @@ function generateCompactWelcome(): string {
   const bottom = `╚${'═'.repeat(w)}╝`;
 
   const title = `${chalk.cyan('◆ YS AGENT')} ${chalk.yellow(modelShort)}`;
-  const titlePad = Math.floor((w - title.length) / 2);
+  const titlePad = Math.max(0, Math.floor((w - safeLen(title)) / 2));
 
   return [
     top,
-    `║${' '.repeat(titlePad)}${title}${' '.repeat(w - titlePad - title.length)}║`,
+    `║${safeRepeat(titlePad)}${title}${safeRepeat(w - titlePad - safeLen(title))}║`,
     `║  ${chalk.gray('Tools:')} ${chalk.green(`${countActiveTools()} Active`)}  ${chalk.gray('Mode:')} ${chalk.cyan(getModeString())}  ║`,
     `║  ${chalk.gray('/ for commands  |  ? for shortcuts')}  ║`,
     bottom,
@@ -95,6 +104,9 @@ function getProjectLine(maxWidth: number): string {
     let line = `  ${chalk.gray('📁')} ${chalk.white(displayPath)}`;
     if (projectType) line += `  ${chalk.gray(`(${projectType})`)}`;
     if (gitBranch) line += `  ${chalk.gray('⎇')} ${chalk.yellow(gitBranch)}`;
+    if (safeLen(line) > maxWidth) {
+      line = `  ${chalk.gray('📁')} ${chalk.white(displayPath)}`;
+    }
     return line;
   } catch {
     return '';

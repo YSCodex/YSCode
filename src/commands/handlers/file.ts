@@ -32,7 +32,7 @@ export async function handleRead(args: string[]): Promise<boolean> {
     const lines = content.split('\n');
     const ext = extname(fullPath);
     const lang = getLanguageFromExtension(ext);
-    tui.printLine(chalk.cyan(`\n╔═ ${basename(fullPath)} (${lang}) ═${'═'.repeat(Math.min(40, phoneConfig.terminalWidth - 20))}╗`));
+    tui.printLine(chalk.cyan(`\n╔═ ${basename(fullPath)} (${lang}) ═${'═'.repeat(Math.max(0, Math.min(40, phoneConfig.terminalWidth - 20)))}╗`));
     tui.printLine(chalk.gray(`  Path: ${relative(process.cwd(), fullPath)} | ${lines.length} lines | ${formatBytes(stat.size)}`));
     tui.printLine('');
     const maxLines = showAll ? lines.length : Math.min(lines.length, 100);

@@ -2,8 +2,9 @@ node_modules/
 dist/
 .env
 *.log
+*.tgz
 .ys/sessions/
 .ys/backups/
 .ys/trash/
 .ys/exports/
-~/.ys/
+src/src/

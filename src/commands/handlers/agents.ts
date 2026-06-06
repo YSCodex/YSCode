@@ -96,7 +96,7 @@ async function arenaStart(prompt: string): Promise<boolean> {
   const activeProv = configManager.getActiveProvider();
   const keySet = !!(activeProv.apiKey || process.env.OPENROUTER_API_KEY);
   if (!keySet) {
-    tui.printLine(`║  ${chalk.red('✗ No API key configured for OpenRouter')}${' '.repeat(w - 44)}║`);
+    tui.printLine(`║  ${chalk.red('✗ No API key configured for OpenRouter')}${' '.repeat(Math.max(0, w - 44))}║`);
     tui.printLine(chalk.cyan(`╚${'═'.repeat(w)}╝`));
     return true;
   }
@@ -118,8 +118,8 @@ export async function handleTasks(args: string[]): Promise<boolean> {
   } else {
     const w = Math.min(phoneConfig.terminalWidth - 2, 50);
     tui.printLine(chalk.cyan(`\n╔═ Background Tasks ${'═'.repeat(Math.max(0, w - 18))}╗`));
-    tui.printLine(`║  ${chalk.gray('No background tasks running')}${' '.repeat(w - 30)}║`);
-    tui.printLine(`║  ${chalk.gray('Use /background <command> to run a task')}${' '.repeat(w - 45)}║`);
+    tui.printLine(`║  ${chalk.gray('No background tasks running')}${' '.repeat(Math.max(0, w - 30))}║`);
+    tui.printLine(`║  ${chalk.gray('Use /background <command> to run a task')}${' '.repeat(Math.max(0, w - 45))}║`);
     tui.printLine(chalk.cyan(`╚${'═'.repeat(w)}╝`));
   }
   return true;

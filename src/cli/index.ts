@@ -3,7 +3,7 @@ declare const __APP_VERSION__: string;
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { configManager } from '../config/index.js';
-import { getLogger, destroyAll } from '../logger/index.js';
+import { getLogger, setAllLevels, setConsoleSuppressed, destroyAll } from '../logger/index.js';
 import { initializeTools } from '../tools/index.js';
 import { AgentManager } from './agent.js';
 import { InteractiveMode } from './interactive.js';
@@ -37,6 +37,7 @@ program
   .action(async (message?: string) => {
     try {
       const interactive = new InteractiveMode();
+      showBanner();
       await interactive.start(message);
     } catch (error) {
       console.error(chalk.red('Fatal error:'), error);
@@ -291,46 +292,99 @@ program
     console.log(chalk.green('\n✓ Diagnostics complete\n'));
   });
 
+function showBanner(): void {
+  const config = configManager.getConfig();
+  const provider = configManager.getActiveProvider();
+  const w = Math.min(process.stdout.columns || 80, 54);
+  const top = `╔${'═'.repeat(w)}╗`;
+  const bottom = `╚${'═'.repeat(w)}╝`;
+  const versionLine = `  YS Code Agent v${APP_VERSION}  `;
+  const versionPad = Math.max(0, Math.floor((w - versionLine.length) / 2));
+  const tagline = 'AI-Powered Terminal Coding Agent';
+  const taglinePad = Math.max(0, Math.floor((w - tagline.length) / 2));
+
+  console.log('');
+  console.log(chalk.cyan(top));
+  console.log(`║${' '.repeat(versionPad)}${chalk.white(versionLine)}${' '.repeat(Math.max(0, w - versionPad - versionLine.length))}║`);
+  console.log(`║${' '.repeat(taglinePad)}${chalk.gray(tagline)}${' '.repeat(Math.max(0, w - taglinePad - tagline.length))}║`);
+  console.log(chalk.cyan(bottom));
+
+  const cwd = process.cwd();
+  const home = process.env.HOME || '/home';
+  const displayPath = cwd.startsWith(home) ? '~' + cwd.slice(home.length) : cwd;
+  const branch = getGitBranch();
+
+  console.log(`  ${chalk.gray('Provider:')} ${chalk.cyan(provider.name)}`);
+  console.log(`  ${chalk.gray('Model:')}    ${chalk.yellow(config.model.model)}`);
+  console.log(`  ${chalk.gray('Directory:')} ${chalk.white(displayPath)}${branch ? ` ${chalk.gray('⎇')} ${chalk.yellow(branch)}` : ''}`);
+  console.log(`  ${chalk.gray('Memory:')}  ${chalk.green('✓ Enabled')}`);
+  try {
+    const { toolRegistry } = require('../tools/index.js');
+    const tools = toolRegistry.getToolNames();
+    console.log(`  ${chalk.gray('Tools:')}   ${chalk.green(`${tools.length} available`)}`);
+  } catch {}
+  console.log('');
+}
+
+function getGitBranch(): string | null {
+  try {
+    const fs = require('fs');
+    const head = fs.readFileSync('.git/HEAD', 'utf-8').trim();
+    const match = head.match(/ref: refs\/heads\/(.+)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyGlobalOptions(rawArgs: string[]): void {
+  let verbose = false;
+  for (let i = 0; i < rawArgs.length; i++) {
+    const arg = rawArgs[i];
+    if (arg === '--verbose') {
+      verbose = true;
+    } else if (arg === '--read-only') {
+      configManager.set('security.readOnlyMode', true);
+    } else if (arg === '--sandbox') {
+      configManager.set('security.sandboxMode', true);
+    } else if (arg === '--non-interactive') {
+      configManager.set('nonInteractive', true);
+    } else if ((arg === '--config' || arg === '-c') && i + 1 < rawArgs.length) {
+      const { ConfigManager } = require('../config/index.js');
+      new ConfigManager(rawArgs[++i]);
+    } else if ((arg === '--model' || arg === '-m') && i + 1 < rawArgs.length) {
+      configManager.set('model.model', rawArgs[++i]);
+    } else if ((arg === '--provider' || arg === '-p') && i + 1 < rawArgs.length) {
+      configManager.setActiveProvider(rawArgs[++i]);
+    } else if ((arg === '--directory' || arg === '-d') && i + 1 < rawArgs.length) {
+      process.chdir(rawArgs[++i]);
+    }
+  }
+  setAllLevels(verbose ? 'debug' : 'warn');
+  setConsoleSuppressed(!verbose);
+}
+
 async function main() {
-  program.parse(process.argv);
+  const rawArgs = process.argv.slice(2);
+  const knownCommands = new Set(program.commands.map(c => c.name()));
 
-  const options = program.opts();
+  // Check if first positional arg is a known command
+  const firstArg = rawArgs.find(a => !a.startsWith('-'));
+  const hasKnownCommand = firstArg ? knownCommands.has(firstArg) : false;
+  const hasHelpFlag = rawArgs.includes('--help') || rawArgs.includes('-h');
+  const hasVersionFlag = rawArgs.includes('--version') || rawArgs.includes('-V');
 
-  if (options.config) {
-    const { ConfigManager } = await import('../config/index.js');
-    const customConfig = new ConfigManager(options.config);
+  if (hasKnownCommand || hasHelpFlag || hasVersionFlag) {
+    applyGlobalOptions(rawArgs);
+    program.parse(process.argv);
+    return;
   }
 
-  if (options.model) {
-    configManager.set('model.model', options.model);
-  }
-
-  if (options.provider) {
-    configManager.setActiveProvider(options.provider);
-  }
-
-  if (options.directory) {
-    process.chdir(options.directory);
-  }
-
-  if (options.readOnly) {
-    configManager.set('security.readOnlyMode', true);
-  }
-
-  if (options.sandbox) {
-    configManager.set('security.sandboxMode', true);
-  }
-
-  if (options.verbose) {
-    configManager.set('logging.level', 'debug');
-  }
-
-  const noCommand = process.argv.length <= 2 || process.argv[2]?.startsWith('-');
-
-  if (noCommand) {
-    const interactive = new InteractiveMode();
-    await interactive.start();
-  }
+  // No command — parse global options manually, show banner, start interactive
+  applyGlobalOptions(rawArgs);
+  showBanner();
+  const interactive = new InteractiveMode();
+  await interactive.start();
 }
 
 main().catch((error) => {

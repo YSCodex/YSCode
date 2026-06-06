@@ -158,7 +158,7 @@ export class CommandPopup {
 
     const pw = phoneConfig.getPopupHeight();
     const maxHeight = Math.min(pw + 2, process.stdout.rows ? process.stdout.rows - 4 : 12);
-    const width = Math.min(process.stdout.columns ? process.stdout.columns - 4 : 60, 60);
+    const width = Math.max(Math.min(process.stdout.columns ? process.stdout.columns - 4 : 60, 60), 10);
 
     const top = `┌─${chalk.cyan(' Commands ')}${'─'.repeat(Math.max(0, width - 11))}┐`;
 

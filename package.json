@@ -26,8 +26,7 @@
     "format": "prettier --write src/",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run build",
-    "postinstall": "node -e \"console.log('\\n◆ YS Code Agent installed! Run \\\"ys\\\" to start.\\n')\""
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "ai",

@@ -58,6 +58,11 @@ const ALL_COMMANDS: CommandEntry[] = [
   { command: 'approval-mode', description: 'Change approval mode', category: 'settings' },
   { command: 'tools', description: 'List available tools', category: 'settings' },
   { command: 'vim', description: 'Toggle vim mode', category: 'settings' },
+  { command: 'update', description: 'Self-update from git', category: 'system' },
+  { command: 'workspace', description: 'Manage workspaces', category: 'system' },
+  { command: 'project-index', description: 'Index project for search', category: 'files' },
+  { command: 'watch', description: 'Watch files for changes', category: 'files' },
+  { command: 'publish', description: 'Publish to npm', category: 'system' },
 ];
 
 const CATEGORY_ICONS: Record<string, string> = {

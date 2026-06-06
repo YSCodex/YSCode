@@ -951,6 +951,292 @@ function showSpecificHelp(command: string): void {
   }
 }
 
+reg({
+  name: 'update',
+  aliases: ['upgrade', 'self-update'],
+  description: 'Self-update from git (pull + rebuild)',
+  category: 'system',
+  handler: async () => {
+    const { execSync } = await import('child_process');
+    const { existsSync } = await import('fs');
+    tui.printLine(chalk.cyan('\n◆ Checking for updates...'));
+    const isGit = existsSync('.git');
+    if (!isGit) {
+      tui.printLine(chalk.yellow('Not a git repository. Update manually via npm.'));
+      tui.printLine(chalk.gray('  npm install -g git+https://github.com/YSCodex/YSCode.git'));
+      return true;
+    }
+    try {
+      tui.printLine(chalk.gray('  Pulling latest code...'));
+      execSync('git pull origin main 2>/dev/null || git pull origin master 2>/dev/null', { stdio: 'pipe' });
+      tui.printLine(chalk.green('  ✓ Code updated'));
+    } catch {
+      tui.printLine(chalk.yellow('  Already up to date or network issue'));
+    }
+    try {
+      tui.printLine(chalk.gray('  Installing dependencies...'));
+      execSync('npm install', { stdio: 'pipe' });
+      tui.printLine(chalk.green('  ✓ Dependencies installed'));
+    } catch (e) {
+      tui.printLine(chalk.red(`  ✗ npm install failed: ${e}`));
+      return true;
+    }
+    try {
+      tui.printLine(chalk.gray('  Building...'));
+      execSync('npm run build', { stdio: 'pipe' });
+      tui.printLine(chalk.green('  ✓ Build complete'));
+    } catch (e) {
+      tui.printLine(chalk.red(`  ✗ Build failed: ${e}`));
+      return true;
+    }
+    tui.printLine(chalk.green('\n✓ YS Code Agent updated successfully!'));
+    tui.printLine(chalk.gray('  Restart the agent to use the latest version.'));
+    return true;
+  },
+});
+
+reg({
+  name: 'vim',
+  aliases: ['vim-mode'],
+  description: 'Toggle vim keybindings',
+  category: 'settings',
+  handler: async (args) => {
+    const state = args[0]?.toLowerCase();
+    const current = configManager.get('vimMode') as boolean || false;
+    if (state === 'on' || state === 'true' || state === '1') {
+      configManager.set('vimMode', true);
+      tui.printLine(chalk.green('✓ Vim mode enabled'));
+      tui.printLine(chalk.gray('  j/k for up/down, h/l for left/right, dd to clear'));
+    } else if (state === 'off' || state === 'false' || state === '0') {
+      configManager.set('vimMode', false);
+      tui.printLine(chalk.green('✓ Vim mode disabled'));
+    } else {
+      const newState = !current;
+      configManager.set('vimMode', newState);
+      tui.printLine(chalk.green(`✓ Vim mode: ${newState ? 'ON' : 'OFF'}`));
+      if (newState) tui.printLine(chalk.gray('  j/k: up/down | h/l: left/right | dd: clear line'));
+    }
+    return true;
+  },
+});
+
+reg({
+  name: 'workspace',
+  aliases: ['ws', 'workdir'],
+  description: 'Manage workspaces',
+  category: 'system',
+  handler: async (args) => {
+    const sub = args[0]?.toLowerCase();
+    const { existsSync, readFileSync, writeFileSync, mkdirSync } = await import('fs');
+    const { join } = await import('path');
+    const { homedir } = await import('os');
+    const wsDir = join(homedir(), '.ys', 'workspaces');
+    const wsFile = join(wsDir, 'workspaces.json');
+    if (!existsSync(wsDir)) mkdirSync(wsDir, { recursive: true });
+    let workspaces: Record<string, string> = {};
+    try {
+      if (existsSync(wsFile)) workspaces = JSON.parse(readFileSync(wsFile, 'utf-8'));
+    } catch {}
+    if (sub === 'save' || sub === 'add') {
+      const name = args[1] || basename2(process.cwd());
+      workspaces[name] = process.cwd();
+      writeFileSync(wsFile, JSON.stringify(workspaces, null, 2), 'utf-8');
+      tui.printLine(chalk.green(`✓ Workspace saved: ${name} → ${process.cwd()}`));
+    } else if (sub === 'load' || sub === 'switch') {
+      const name = args[1];
+      if (name && workspaces[name]) {
+        process.chdir(workspaces[name]);
+        tui.printLine(chalk.green(`✓ Switched to workspace: ${name}`));
+        tui.printLine(chalk.gray(`  ${workspaces[name]}`));
+      } else if (name) {
+        tui.printLine(chalk.red(`Workspace not found: ${name}`));
+      } else {
+        const keys = Object.keys(workspaces);
+        tui.printLine(chalk.cyan('\nSaved Workspaces:'));
+        for (const k of keys) tui.printLine(`  ${chalk.yellow(k)} → ${chalk.gray(workspaces[k])}`);
+      }
+    } else if (sub === 'list' || sub === 'ls') {
+      const keys = Object.keys(workspaces);
+      if (keys.length === 0) {
+        tui.printLine(chalk.yellow('No saved workspaces'));
+      } else {
+        tui.printLine(chalk.cyan('\nSaved Workspaces:'));
+        for (const k of keys) tui.printLine(`  ${chalk.yellow(k)} → ${chalk.gray(workspaces[k])}`);
+      }
+    } else if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
+      const name = args[1];
+      if (name && workspaces[name]) {
+        delete workspaces[name];
+        writeFileSync(wsFile, JSON.stringify(workspaces, null, 2), 'utf-8');
+        tui.printLine(chalk.green(`✓ Removed workspace: ${name}`));
+      } else {
+        tui.printLine(chalk.red(`Workspace not found: ${name}`));
+      }
+    } else {
+      tui.printLine(chalk.cyan('\nWorkspace Manager:'));
+      tui.printLine(`  ${chalk.yellow('/workspace save [name]')}    ${chalk.gray('Save current directory')}`);
+      tui.printLine(`  ${chalk.yellow('/workspace load <name>')}    ${chalk.gray('Switch to workspace')}`);
+      tui.printLine(`  ${chalk.yellow('/workspace list')}           ${chalk.gray('List workspaces')}`);
+      tui.printLine(`  ${chalk.yellow('/workspace remove <name>')}  ${chalk.gray('Remove workspace')}`);
+    }
+    return true;
+  },
+});
+
+reg({
+  name: 'project-index',
+  aliases: ['index', 'scan', 'code-index'],
+  description: 'Index project for semantic search',
+  category: 'files',
+  handler: async (args) => {
+    const { readFileSync, statSync, readdirSync, existsSync, writeFileSync, mkdirSync } = await import('fs');
+    const { join, extname, relative, resolve } = await import('path');
+    tui.printLine(chalk.cyan('\n◆ Indexing project...'));
+    const startTime = Date.now();
+    const projectRoot = process.cwd();
+    const idxDir = join(projectRoot, '.ys', 'index');
+    if (!existsSync(idxDir)) mkdirSync(idxDir, { recursive: true });
+    const ignore = ['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', '.ys'];
+    const extensions = ['.ts', '.tsx', '.js', '.jsx', '.py', '.rs', '.go', '.java', '.kt', '.swift', '.php', '.rb', '.c', '.cpp', '.h', '.hpp', '.cs', '.vue', '.svelte', '.html', '.css', '.scss', '.json', '.yaml', '.yml', '.md', '.toml'];
+    let totalFiles = 0;
+    let totalLines = 0;
+    const index: Array<{ path: string; lines: number; size: number; lang: string }> = [];
+    function scan(dir: string): void {
+      let entries: string[] = [];
+      try { entries = readdirSync(dir); } catch { return; }
+      for (const entry of entries) {
+        if (ignore.includes(entry) || entry.startsWith('.')) continue;
+        const full = join(dir, entry);
+        try {
+          const stat = statSync(full);
+          if (stat.isDirectory()) scan(full);
+          else if (stat.isFile()) {
+            const ext = extname(entry).toLowerCase();
+            if (extensions.includes(ext)) {
+              const content = readFileSync(full, 'utf-8');
+              const lines = content.split('\n').length;
+              const rel = relative(projectRoot, full);
+              const lang = getLangFromExt(ext);
+              index.push({ path: rel, lines, size: stat.size, lang });
+              totalFiles++;
+              totalLines += lines;
+              if (totalFiles % 100 === 0) tui.printLine(chalk.gray(`  Indexed ${totalFiles} files...`));
+            }
+          }
+        } catch {}
+      }
+    }
+    scan(projectRoot);
+    const idxData = {
+      project: basename2(projectRoot),
+      indexedAt: new Date().toISOString(),
+      totalFiles,
+      totalLines,
+      files: index,
+    };
+    writeFileSync(join(idxDir, 'code-index.json'), JSON.stringify(idxData, null, 2), 'utf-8');
+    const duration = Date.now() - startTime;
+    tui.printLine(chalk.green(`\n✓ Indexed ${totalFiles} files (${totalLines.toLocaleString()} lines) in ${duration}ms`));
+    tui.printLine(chalk.gray(`  Index: ${join(idxDir, 'code-index.json')}`));
+    if (args.includes('--search') || args.includes('-s')) {
+      const query = args.filter(a => !a.startsWith('-')).join(' ');
+      if (query) {
+        const results = index.filter(f =>
+          f.path.toLowerCase().includes(query.toLowerCase()) ||
+          f.lang.toLowerCase().includes(query.toLowerCase())
+        ).slice(0, 20);
+        tui.printLine(chalk.cyan(`\nSearch results for "${query}":`));
+        for (const r of results) {
+          tui.printLine(`  ${chalk.white(r.path)} ${chalk.gray(`(${r.lines} lines, ${r.lang})`)}`);
+        }
+      }
+    }
+    return true;
+  },
+});
+
+reg({
+  name: 'watch',
+  aliases: ['monitor', 'fswatch'],
+  description: 'Watch files for changes',
+  category: 'files',
+  handler: async (args) => {
+    const path = args[0] || '.';
+    const { watch, existsSync, statSync } = await import('fs');
+    const { resolve } = await import('path');
+    const fullPath = resolve(process.cwd(), path);
+    if (!existsSync(fullPath)) {
+      tui.printLine(chalk.red(`Path not found: ${path}`));
+      return true;
+    }
+    tui.printLine(chalk.cyan(`\n◆ Watching: ${path}`));
+    tui.printLine(chalk.gray('  Press Ctrl+C to stop watching'));
+    tui.printLine('');
+    const stat = statSync(fullPath);
+    if (stat.isDirectory()) {
+      try {
+        const watcher = watch(fullPath, { recursive: true }, (eventType, filename) => {
+          if (filename) {
+            const ts = new Date().toLocaleTimeString();
+            tui.printLine(chalk.gray(`  [${ts}] ${chalk.white(String(filename))}: ${eventType === 'change' ? chalk.yellow('modified') : chalk.green('added/removed')}`));
+          }
+        });
+        (process as any)._ysWatcher = watcher;
+      } catch {
+        tui.printLine(chalk.yellow('  File watching not available on this platform'));
+      }
+    } else {
+      try {
+        const watcher = watch(fullPath, (eventType) => {
+          const ts = new Date().toLocaleTimeString();
+          tui.printLine(chalk.gray(`  [${ts}] ${chalk.white(path)}: ${eventType === 'change' ? chalk.yellow('modified') : chalk.green('changed')}`));
+        });
+        (process as any)._ysWatcher = watcher;
+      } catch {
+        tui.printLine(chalk.yellow('  File watching not available on this platform'));
+      }
+    }
+    return true;
+  },
+});
+
+reg({
+  name: 'publish',
+  aliases: ['npm-publish', 'release'],
+  description: 'Publish to npm registry',
+  category: 'system',
+  handler: async () => {
+    const { execSync } = await import('child_process');
+    tui.printLine(chalk.cyan('\n◆ Publishing to npm...'));
+    tui.printLine(chalk.gray('  This will:'));
+    tui.printLine(chalk.gray('  1. Build the project'));
+    tui.printLine(chalk.gray('  2. Publish to npm registry'));
+    tui.printLine(chalk.yellow('\n  Continue? [y/N]'));
+    const { createInterface } = await import('readline');
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    rl.question('', async (answer: string) => {
+      rl.close();
+      if (answer.trim().toLowerCase() !== 'y') {
+        tui.printLine(chalk.yellow('Publish cancelled'));
+        return;
+      }
+      try {
+        tui.printLine(chalk.gray('  Building...'));
+        execSync('npm run build', { stdio: 'pipe' });
+        tui.printLine(chalk.green('  ✓ Build complete'));
+        tui.printLine(chalk.gray('  Publishing...'));
+        execSync('npm publish --access public', { stdio: 'pipe' });
+        tui.printLine(chalk.green('\n✓ Published to npm!'));
+        tui.printLine(chalk.gray('  npm install -g ys-code-agent'));
+      } catch (e: any) {
+        tui.printLine(chalk.red(`\n✗ Publish failed: ${e.stderr || e.message}`));
+        tui.printLine(chalk.gray('  Make sure you are logged in: npm login'));
+      }
+    });
+    return true;
+  },
+});
+
 function generateMdExport(session: { id: string; name: string }, messages: Array<{ role: string; content: string; timestamp: number }>): string {
   const lines: string[] = [
     `# YS Code Agent — Session Export`,
@@ -1016,6 +1302,24 @@ function generateHtmlExport(session: { id: string; name: string }, messages: Arr
   ${msgHtml}
 </body>
 </html>`;
+}
+
+function basename2(p: string): string {
+  return p.split(/[/\\]/).pop() || 'project';
+}
+
+function getLangFromExt(ext: string): string {
+  const map: Record<string, string> = {
+    '.ts': 'TypeScript', '.tsx': 'TSX', '.js': 'JavaScript', '.jsx': 'JSX',
+    '.py': 'Python', '.rs': 'Rust', '.go': 'Go', '.java': 'Java',
+    '.kt': 'Kotlin', '.swift': 'Swift', '.php': 'PHP', '.rb': 'Ruby',
+    '.c': 'C', '.cpp': 'C++', '.h': 'C Header', '.hpp': 'C++ Header',
+    '.cs': 'C#', '.vue': 'Vue', '.svelte': 'Svelte',
+    '.html': 'HTML', '.css': 'CSS', '.scss': 'SCSS',
+    '.json': 'JSON', '.yaml': 'YAML', '.yml': 'YAML',
+    '.md': 'Markdown', '.toml': 'TOML',
+  };
+  return map[ext] || 'Unknown';
 }
 
 export function getCommand(name: string): CommandDef | undefined {

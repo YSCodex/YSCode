@@ -189,18 +189,14 @@ export class CommandPopup {
 
   private getCategorizedCommands(): Array<{ category: string; commands: CommandEntry[] }> {
     const cats: Array<{ category: string; commands: CommandEntry[] }> = [];
-    const seen = new Set<string>();
-
-    for (const cmd of this.filteredCommands) {
-      if (seen.has(cmd.command)) continue;
-      seen.add(cmd.command);
-    }
+    const added = new Set<string>();
 
     const order = ['system', 'files', 'git', 'agents', 'code', 'memory', 'settings'] as const;
     for (const cat of order) {
-      const cmds = this.filteredCommands.filter((c) => c.category === cat && !seen.has(c.command));
+      const cmds = this.filteredCommands.filter((c) => c.category === cat && !added.has(c.command));
       if (cmds.length > 0) {
         cats.push({ category: cat, commands: cmds });
+        cmds.forEach(c => added.add(c.command));
       }
     }
 

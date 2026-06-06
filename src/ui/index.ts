@@ -5,7 +5,8 @@ import { phoneConfig } from './phoneOptimizer.js';
 import { CommandPopup, CATEGORY_ICONS, CommandEntry } from './CommandPopup.js';
 import { generateWelcome, animateDiamond } from './WelcomeScreen.js';
 import { AgentStatus } from '../types.js';
-import { createInterface, cursorTo, clearLine, clearScreenDown, moveCursor } from 'readline';
+import { renderMarkdown } from '../utils/renderMarkdown.js';
+import { cursorTo, clearLine, moveCursor, emitKeypressEvents } from 'readline';
 
 const logger = getLogger('ui');
 
@@ -36,7 +37,7 @@ export class TUI {
   private status: AgentStatus = 'idle';
   private approvalMode: ApprovalMode = 'normal';
   private agentMode: AgentMode = 'chat';
-  private onInput: ((input: string) => void) | null = null;
+  private onInput: ((input: string) => Promise<void> | void) | null = null;
   private onCancelRequest: (() => void) | null = null;
   private running = false;
   private commandPopup: CommandPopup;
@@ -44,7 +45,11 @@ export class TUI {
   private historyIndex = -1;
   private popupActive = false;
   private cancelRequested = false;
-  private rl: ReturnType<typeof createInterface> | null = null;
+
+  private inputBuffer = '';
+  private cursorPos = 0;
+  private popupLineCount = 0;
+  private prevInput: string | null = null;
 
   constructor() {
     this.commandPopup = new CommandPopup();
@@ -86,47 +91,8 @@ export class TUI {
     this.startTTYMode();
   }
 
-  private startTTYMode(): void {
-    const self = this;
-    this.rl = createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      prompt: '',
-      historySize: 0,
-      removeHistoryDuplicates: true,
-    });
-
-    this.rl.on('line', async (line: string) => {
-      const trimmed = line.trim();
-      if (trimmed) {
-        this.addHistory(trimmed);
-        if (this.onInput) {
-          await this.onInput(trimmed);
-        }
-      }
-      this.showPrompt();
-    });
-
-    this.rl.on('SIGINT', () => {
-      if (this.cancelRequested || this.status === 'thinking' || this.status === 'executing') {
-        if (this.onCancelRequest) this.onCancelRequest();
-      } else {
-        process.stdout.write('\n');
-        this.printLine(chalk.yellow('Use /exit to quit, or press Ctrl+C again to force quit'));
-        this.cancelRequested = true;
-        setTimeout(() => { this.cancelRequested = false; }, 2000);
-      }
-      this.showPrompt();
-    });
-
-    this.rl.on('close', () => {
-      process.exit(0);
-    });
-
-    this.showPrompt();
-  }
-
   private startLineMode(): void {
+    const { createInterface } = require('readline');
     const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: '' });
     rl.on('line', (line: string) => {
       const trimmed = line.trim();
@@ -138,6 +104,308 @@ export class TUI {
     });
     rl.on('SIGINT', () => process.exit(0));
     rl.prompt();
+  }
+
+  private startTTYMode(): void {
+    try { process.stdin.setRawMode?.(true); } catch {}
+    emitKeypressEvents(process.stdin);
+
+    this.inputBuffer = '';
+    this.cursorPos = 0;
+    this.popupLineCount = 0;
+
+    process.stdin.on('keypress', this.handleKeypress.bind(this));
+
+    this.renderScreen();
+  }
+
+  private async handleKeypress(str: string, key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean }): Promise<void> {
+    if (!this.running) return;
+
+    if (!key) key = {};
+    const k = key.name || '';
+    const c = key.ctrl || false;
+
+    if (this.popupActive) {
+      await this.handlePopupKeypress(str, key);
+      return;
+    }
+
+    if (k === 'escape') {
+      if (this.inputBuffer.length > 0) {
+        this.inputBuffer = '';
+        this.cursorPos = 0;
+      }
+      this.renderScreen();
+      return;
+    }
+
+    if (k === 'return' || k === 'enter') {
+      const input = this.inputBuffer.trim();
+      this.inputBuffer = '';
+      this.cursorPos = 0;
+      if (input) {
+        this.addHistory(input);
+        if (this.onInput) {
+          await this.onInput(input);
+        }
+      }
+      this.renderScreen();
+      return;
+    }
+
+    if (k === 'backspace') {
+      if (this.cursorPos > 0) {
+        this.inputBuffer = this.inputBuffer.slice(0, this.cursorPos - 1) + this.inputBuffer.slice(this.cursorPos);
+        this.cursorPos--;
+      }
+      this.renderScreen();
+      return;
+    }
+
+    if (k === 'up') {
+      if (this.inputHistory.length > 0) {
+        if (this.historyIndex === -1) {
+          this.historyIndex = this.inputHistory.length - 1;
+        } else if (this.historyIndex > 0) {
+          this.historyIndex--;
+        }
+        this.inputBuffer = this.inputHistory[this.historyIndex];
+        this.cursorPos = this.inputBuffer.length;
+      }
+      this.renderScreen();
+      return;
+    }
+
+    if (k === 'down') {
+      if (this.historyIndex >= 0) {
+        this.historyIndex++;
+        if (this.historyIndex >= this.inputHistory.length) {
+          this.historyIndex = -1;
+          this.inputBuffer = '';
+        } else {
+          this.inputBuffer = this.inputHistory[this.historyIndex];
+        }
+        this.cursorPos = this.inputBuffer.length;
+      }
+      this.renderScreen();
+      return;
+    }
+
+    if (k === 'left') {
+      if (this.cursorPos > 0) this.cursorPos--;
+      this.renderScreen();
+      return;
+    }
+
+    if (k === 'right') {
+      if (this.cursorPos < this.inputBuffer.length) this.cursorPos++;
+      this.renderScreen();
+      return;
+    }
+
+    if (k === 'tab') {
+      this.handleTab();
+      this.renderScreen();
+      return;
+    }
+
+    if (c && k === 'c') {
+      if (this.cancelRequested || this.status === 'thinking' || this.status === 'executing') {
+        if (this.onCancelRequest) this.onCancelRequest();
+      } else {
+        this.printLine('');
+        this.printLine(chalk.yellow('Use /exit to quit, or press Ctrl+C again to force quit'));
+        this.cancelRequested = true;
+        setTimeout(() => { this.cancelRequested = false; }, 2000);
+      }
+      this.renderScreen();
+      return;
+    }
+
+    if (c && k === 'l') {
+      this.clear();
+      this.renderScreen();
+      return;
+    }
+
+    if (c && k === 'x') {
+      await this.openExternalEditor();
+      return;
+    }
+
+    if (c && k === 'a') {
+      this.cursorPos = 0;
+      this.renderScreen();
+      return;
+    }
+
+    if (c && k === 'e') {
+      this.cursorPos = this.inputBuffer.length;
+      this.renderScreen();
+      return;
+    }
+
+    if (str && str.length === 1 && str.charCodeAt(0) >= 32) {
+      this.inputBuffer = this.inputBuffer.slice(0, this.cursorPos) + str + this.inputBuffer.slice(this.cursorPos);
+      this.cursorPos++;
+
+      if (str === '/') {
+        this.popupActive = true;
+        this.commandPopup.open();
+        this.commandPopup.setFilter('');
+        this.renderScreen();
+        return;
+      }
+
+      if (this.inputBuffer.startsWith('/') && this.inputBuffer.length > 1) {
+        this.popupActive = true;
+        this.commandPopup.open();
+        this.commandPopup.setFilter(this.inputBuffer.slice(1));
+        this.renderScreen();
+        return;
+      }
+    }
+
+    this.renderScreen();
+  }
+
+  private clearPopupLines(): void {
+    if (this.popupLineCount > 0) {
+      try { moveCursor(process.stdout, 0, -(this.popupLineCount + 1)); } catch {}
+      for (let i = 0; i <= this.popupLineCount; i++) {
+        try { cursorTo(process.stdout, 0); clearLine(process.stdout, 1); process.stdout.write('\n'); } catch {}
+      }
+      this.popupLineCount = 0;
+    }
+  }
+
+  private async handlePopupKeypress(str: string, key: { name?: string; ctrl?: boolean }): Promise<void> {
+    const k = key.name || '';
+
+    if (k === 'escape') {
+      this.clearPopupLines();
+      this.popupActive = false;
+      this.commandPopup.close();
+      this.inputBuffer = '';
+      this.cursorPos = 0;
+      this.renderScreen();
+      return;
+    }
+
+    if (k === 'up') {
+      this.commandPopup.moveUp();
+      this.renderScreen();
+      return;
+    }
+
+    if (k === 'down') {
+      this.commandPopup.moveDown();
+      this.renderScreen();
+      return;
+    }
+
+    if (k === 'return' || k === 'enter') {
+      const cmd = this.commandPopup.getSelectedCommand();
+      this.popupActive = false;
+      this.commandPopup.close();
+      this.clearPopupLines();
+
+      if (cmd) {
+        const fullInput = `/${cmd} `;
+        if (this.onInput) {
+          await this.onInput(fullInput.trim());
+        }
+      }
+      this.renderScreen();
+      return;
+    }
+
+    if (k === 'backspace') {
+      this.commandPopup.deleteChar();
+      const filter = this.commandPopup.getFilterText();
+      if (filter.length === 0) {
+        this.clearPopupLines();
+        this.popupActive = false;
+        this.commandPopup.close();
+        this.inputBuffer = '/';
+        this.cursorPos = 1;
+      }
+      this.renderScreen();
+      return;
+    }
+
+    if (str && str.length === 1 && str.charCodeAt(0) >= 32) {
+      this.commandPopup.appendChar(str);
+      this.renderScreen();
+      return;
+    }
+  }
+
+  private handleTab(): void {
+    const match = this.inputBuffer.match(/^\/?(\w*)$/);
+    if (match) {
+      const partial = match[1].toLowerCase();
+      const { ALL_COMMANDS } = require('./CommandPopup.js');
+      const cmds = ALL_COMMANDS.map((c: CommandEntry) => c.command).filter((c: string) => c.startsWith(partial));
+      if (cmds.length === 1) {
+        this.inputBuffer = `/${cmds[0]} `;
+        this.cursorPos = this.inputBuffer.length;
+      }
+    }
+  }
+
+  private async openExternalEditor(): Promise<void> {
+    const editor = process.env.EDITOR || 'nano';
+    const { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } = await import('fs');
+    const tmpDir = '/tmp/ys-agent';
+    if (!existsSync(tmpDir)) mkdirSync(tmpDir, { recursive: true });
+    const tmpFile = `/tmp/ys-agent/input-${Date.now()}.md`;
+    writeFileSync(tmpFile, this.inputBuffer, 'utf-8');
+
+    const { execSync } = await import('child_process');
+    try {
+      execSync(`${editor} "${tmpFile}"`, { stdio: 'inherit' });
+      const content = readFileSync(tmpFile, 'utf-8').trim();
+      if (content) {
+        this.inputBuffer = content;
+        this.cursorPos = content.length;
+      }
+    } catch {}
+    try { unlinkSync(tmpFile); } catch {}
+    this.renderScreen();
+  }
+
+  private renderScreen(): void {
+    if (!process.stdout.isTTY) return;
+
+    const promptLine = this.buildPromptLine();
+
+    if (this.popupLineCount > 0) {
+      try { moveCursor(process.stdout, 0, -(this.popupLineCount + 1)); } catch {}
+    }
+
+    if (this.popupActive && this.commandPopup.isVisible()) {
+      const popup = this.commandPopup.render();
+      const popupLines = popup.split('\n');
+      this.popupLineCount = popupLines.length;
+
+      for (const l of popupLines) {
+        try {
+          cursorTo(process.stdout, 0);
+          clearLine(process.stdout, 1);
+          process.stdout.write(l + '\n');
+        } catch {}
+      }
+    } else {
+      this.popupLineCount = 0;
+    }
+
+    try {
+      cursorTo(process.stdout, 0);
+      clearLine(process.stdout, 1);
+      process.stdout.write(promptLine);
+    } catch {}
   }
 
   private buildPromptPrefix(): string {
@@ -158,10 +426,25 @@ export class TUI {
     return `${statusIndicator} ${chalk.cyan('ys')} ${chalk.yellow(`[${modelShort}]`)}${modeBadge}${approvalBadge} ${chalk.gray('›')} `;
   }
 
+  private buildPromptLine(): string {
+    const prefix = this.buildPromptPrefix();
+    const input = this.inputBuffer || '';
+    const cursor = chalk.gray('█');
+    let line: string;
+
+    if (this.cursorPos >= input.length) {
+      line = prefix + input + cursor;
+    } else {
+      const before = input.slice(0, this.cursorPos);
+      const after = input.slice(this.cursorPos);
+      line = prefix + before + cursor + after;
+    }
+
+    return line;
+  }
+
   showPrompt(): void {
-    if (!this.running || !this.rl) return;
-    this.rl.setPrompt(this.buildPromptPrefix());
-    this.rl.prompt(true);
+    if (this.running) this.renderScreen();
   }
 
   private addHistory(input: string): void {
@@ -172,15 +455,12 @@ export class TUI {
     this.saveHistory();
   }
 
-  setOnInput(handler: (input: string) => void): void {
+  setOnInput(handler: (input: string) => Promise<void> | void): void {
     this.onInput = handler;
   }
 
   setStatus(status: AgentStatus): void {
     this.status = status;
-    if (this.rl) {
-      this.rl.setPrompt(this.buildPromptPrefix());
-    }
   }
 
   setApprovalMode(mode: ApprovalMode): void {
@@ -204,7 +484,6 @@ export class TUI {
       console.log(line);
       return;
     }
-    // Clear current line (hides partial user input), write output
     try {
       cursorTo(process.stdout, 0);
       clearLine(process.stdout, 1);
@@ -215,7 +494,10 @@ export class TUI {
   }
 
   printAssistant(message: string): void {
-    this.printLine(chalk.green(message));
+    const rendered = renderMarkdown(message);
+    for (const line of rendered.split('\n')) {
+      this.printLine(line);
+    }
   }
 
   printWarning(message: string): void {
@@ -245,14 +527,7 @@ export class TUI {
     }
   }
 
-  showStatusBar(_info: {
-    status: AgentStatus;
-    messages: number;
-    tokens: number;
-    task?: string;
-    provider?: string;
-    model?: string;
-  }): void {
+  showStatusBar(_info: { status: AgentStatus; messages: number; tokens: number; task?: string; provider?: string; model?: string }): void {
   }
 
   printWelcome(): void {
@@ -332,11 +607,8 @@ export class TUI {
 
   stop(): void {
     this.running = false;
-    if (this.rl) {
-      this.rl.close();
-      this.rl = null;
-    }
-    process.stdin.removeAllListeners('data');
+    process.stdin.removeAllListeners('keypress');
+    try { process.stdin.setRawMode?.(false); } catch {}
   }
 
   destroy(): void {

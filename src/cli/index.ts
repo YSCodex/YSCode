@@ -380,8 +380,9 @@ async function main() {
     return;
   }
 
-  // No command — parse global options manually, show banner, start interactive
+  // No command — parse global options manually, init tools, show banner, start interactive
   applyGlobalOptions(rawArgs);
+  initializeTools();
   showBanner();
   const interactive = new InteractiveMode();
   await interactive.start();

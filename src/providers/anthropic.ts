@@ -1,5 +1,5 @@
 import { BaseProvider } from './base.js';
-import { ProviderConfig, ModelConfig, ProviderResponse, ProviderStreamChunk, ToolCall } from '../types.js';
+import { ProviderConfig, ModelConfig, ProviderResponse, ProviderStreamChunk, ToolCall, ToolSchema } from '../types.js';
 
 export class AnthropicProvider extends BaseProvider {
   constructor(config: ProviderConfig, modelConfig: ModelConfig) {
@@ -20,33 +20,6 @@ export class AnthropicProvider extends BaseProvider {
       'x-api-key': this.getApiKey(),
       'anthropic-version': '2023-06-01',
     };
-  }
-
-  protected buildRequestBody(messages: Array<{ role: string; content: string }>, tools?: unknown[]): Record<string, unknown> {
-    const systemMessages = messages.filter((m) => m.role === 'system');
-    const chatMessages = messages.filter((m) => m.role !== 'system');
-
-    const body: Record<string, unknown> = {
-      model: this.modelConfig.model,
-      messages: chatMessages.map((m) => ({
-        role: m.role === 'assistant' ? 'assistant' : 'user',
-        content: m.content,
-      })),
-      max_tokens: this.modelConfig.maxTokens,
-      temperature: this.modelConfig.temperature,
-      top_p: this.modelConfig.topP,
-      stream: false,
-    };
-
-    if (systemMessages.length > 0) {
-      body.system = systemMessages.map((m) => ({ type: 'text', text: m.content }));
-    }
-
-    if (tools && tools.length > 0) {
-      body.tools = tools;
-    }
-
-    return body;
   }
 
   private convertMessages(messages: Array<{ role: string; content: string }>): {
@@ -91,7 +64,7 @@ export class AnthropicProvider extends BaseProvider {
     }
 
     if (tools && tools.length > 0) {
-      body.tools = tools;
+      body.tools = BaseProvider.convertToAnthropicTools(tools as ToolSchema[]);
     }
 
     const response = await this.fetchWithRetry(url, {
@@ -154,7 +127,7 @@ export class AnthropicProvider extends BaseProvider {
     }
 
     if (tools && tools.length > 0) {
-      body.tools = tools;
+      body.tools = BaseProvider.convertToAnthropicTools(tools as ToolSchema[]);
     }
 
     const response = await this.fetchWithRetry(url, {

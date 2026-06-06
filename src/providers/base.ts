@@ -1,4 +1,4 @@
-import { ProviderConfig, ModelConfig, ProviderResponse, ProviderStreamChunk, ToolCall } from '../types.js';
+import { ProviderConfig, ModelConfig, ProviderResponse, ProviderStreamChunk, ToolCall, ToolSchema, ToolParameter } from '../types.js';
 
 export abstract class BaseProvider {
   protected config: ProviderConfig;
@@ -16,6 +16,59 @@ export abstract class BaseProvider {
     messages: Array<{ role: string; content: string }>,
     tools?: unknown[]
   ): AsyncGenerator<ProviderStreamChunk>;
+
+  static convertToOpenAITools(tools: ToolSchema[]): unknown[] {
+    return tools.map((schema) => {
+      const properties: Record<string, Record<string, unknown>> = {};
+      for (const [key, param] of Object.entries(schema.parameters)) {
+        const prop: Record<string, unknown> = {
+          type: param.type,
+          description: param.description,
+        };
+        if (param.enum) prop.enum = param.enum;
+        if (param.minimum !== undefined) prop.minimum = param.minimum;
+        if (param.maximum !== undefined) prop.maximum = param.maximum;
+        properties[key] = prop;
+      }
+
+      return {
+        type: 'function',
+        function: {
+          name: schema.name,
+          description: schema.description,
+          parameters: {
+            type: 'object',
+            properties,
+            required: schema.required,
+          },
+        },
+      };
+    });
+  }
+
+  static convertToAnthropicTools(tools: ToolSchema[]): unknown[] {
+    return tools.map((schema) => {
+      const properties: Record<string, Record<string, unknown>> = {};
+      for (const [key, param] of Object.entries(schema.parameters)) {
+        const prop: Record<string, unknown> = {
+          type: param.type,
+          description: param.description,
+        };
+        if (param.enum) prop.enum = param.enum;
+        properties[key] = prop;
+      }
+
+      return {
+        name: schema.name,
+        description: schema.description,
+        input_schema: {
+          type: 'object',
+          properties,
+          required: schema.required,
+        },
+      };
+    });
+  }
 
   protected getApiKey(): string {
     return this.config.apiKey || process.env[`${this.config.type.toUpperCase()}_API_KEY`] || '';
@@ -48,7 +101,7 @@ export abstract class BaseProvider {
     }
 
     if (tools && tools.length > 0) {
-      body.tools = tools;
+      body.tools = BaseProvider.convertToOpenAITools(tools as ToolSchema[]);
       body.tool_choice = 'auto';
     }
 

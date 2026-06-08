@@ -238,6 +238,7 @@ Separate steps with blank lines.`;
       role: 'tool',
       content: JSON.stringify(result.data || { error: result.error }),
       toolResults: [result],
+      toolCallId: call.id,
       timestamp: Date.now(),
     };
     this.state.messages.push(resultMessage);
@@ -337,10 +338,8 @@ Analyze these errors and create a plan to fix them. What went wrong? How should 
     return false;
   }
 
-  private async generateWithRetry(
-    messages: Array<{ role: string; content: string }>,
-    maxRetries = 3
-  ): Promise<ProviderResponse> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async generateWithRetry(messages: any[], maxRetries = 3): Promise<ProviderResponse> {
     if (!this.provider) {
       this.initProvider();
       if (!this.provider) {
@@ -353,7 +352,10 @@ Analyze these errors and create a plan to fix them. What went wrong? How should 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         const tools = this.tools.getSchemas() as unknown as Record<string, unknown>[];
-        const response = await this.provider.generate(messages, tools);
+        const response = await this.provider.generate(
+          messages as Array<{ role: string; content: string }>,
+          tools
+        );
 
         if (response.toolCalls && response.toolCalls.length > 0) {
           this.state.messages.push({
@@ -369,11 +371,18 @@ Analyze these errors and create a plan to fix them. What went wrong? How should 
               role: 'tool',
               content: JSON.stringify(result.data || { error: result.error }),
               toolResults: [result],
+              toolCallId: toolCall.id,
               timestamp: Date.now(),
             });
           }
 
-          return this.generateWithRetry(messages, maxRetries - 1);
+          return this.generateWithRetry(
+            [
+              { role: 'system', content: SYSTEM_PROMPT },
+              ...this.state.messages.slice(-20),
+            ],
+            maxRetries - 1
+          );
         }
 
         return response;
@@ -555,6 +564,7 @@ Analyze these errors and create a plan to fix them. What went wrong? How should 
             role: 'tool',
             content: JSON.stringify(result.data || { error: result.error }),
             toolResults: [result],
+            toolCallId: toolCall.id,
             timestamp: Date.now(),
           });
         }

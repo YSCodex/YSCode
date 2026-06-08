@@ -168,6 +168,7 @@ export interface AgentMessage {
   content: string;
   toolCalls?: ToolCall[];
   toolResults?: ToolResult[];
+  toolCallId?: string;
   timestamp: number;
   metadata?: Record<string, unknown>;
 }

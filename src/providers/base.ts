@@ -81,13 +81,35 @@ export abstract class BaseProvider {
     };
   }
 
-  protected buildRequestBody(messages: Array<{ role: string; content: string }>, tools?: unknown[]): Record<string, unknown> {
+  protected buildRequestBody(messages: Array<Record<string, unknown>>, tools?: unknown[]): Record<string, unknown> {
+    const mappedMessages: Record<string, unknown>[] = messages.map((m) => {
+      const msg: Record<string, unknown> = {
+        role: m.role,
+      };
+
+      if (m.role === 'tool') {
+        msg.content = m.content;
+        msg.tool_call_id = m.toolCallId || m.tool_call_id || '';
+      } else if (m.role === 'assistant' && m.toolCalls && (m.toolCalls as ToolCall[]).length > 0) {
+        msg.content = m.content || null;
+        msg.tool_calls = (m.toolCalls as ToolCall[]).map((tc: ToolCall) => ({
+          id: tc.id,
+          type: 'function',
+          function: {
+            name: tc.name,
+            arguments: JSON.stringify(tc.arguments),
+          },
+        }));
+      } else {
+        msg.content = m.content || '';
+      }
+
+      return msg;
+    });
+
     const body: Record<string, unknown> = {
       model: this.modelConfig.model,
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
+      messages: mappedMessages,
       temperature: this.modelConfig.temperature,
       max_tokens: this.modelConfig.maxTokens,
       top_p: this.modelConfig.topP,

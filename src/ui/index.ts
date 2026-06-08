@@ -381,28 +381,36 @@ export class TUI {
 
     const promptLine = this.buildPromptLine();
 
-    if (this.popupLineCount > 0) {
-      try { moveCursor(process.stdout, 0, -(this.popupLineCount + 1)); } catch {}
-    }
-
     if (this.popupActive && this.commandPopup.isVisible()) {
+      if (this.popupLineCount > 0) {
+        try { process.stdout.write('\x1b[' + (this.popupLineCount) + 'F'); } catch {}
+      }
+
       const popup = this.commandPopup.render();
       const popupLines = popup.split('\n');
       this.popupLineCount = popupLines.length;
 
       for (const l of popupLines) {
         try {
-          cursorTo(process.stdout, 0);
+          process.stdout.write('\r');
           clearLine(process.stdout, 1);
           process.stdout.write(l + '\n');
         } catch {}
       }
-    } else {
+    } else if (this.popupLineCount > 0) {
+      try { process.stdout.write('\x1b[' + (this.popupLineCount) + 'F'); } catch {}
+      for (let i = 0; i < this.popupLineCount; i++) {
+        try {
+          process.stdout.write('\r');
+          clearLine(process.stdout, 1);
+          process.stdout.write('\n');
+        } catch {}
+      }
       this.popupLineCount = 0;
     }
 
     try {
-      cursorTo(process.stdout, 0);
+      process.stdout.write('\r');
       clearLine(process.stdout, 1);
       process.stdout.write(promptLine);
     } catch {}

@@ -37,7 +37,7 @@ program
   .action(async (message?: string) => {
     try {
       const interactive = new InteractiveMode();
-      showBanner();
+      await showBanner();
       await interactive.start(message);
     } catch (error) {
       console.error(chalk.red('Fatal error:'), error);
@@ -173,8 +173,9 @@ program
         console.log(chalk.gray('  No sessions found'));
       }
       for (const s of sessions) {
-        console.log(`  ${chalk.yellow(s.id)} ${chalk.gray(s.name)}`);
-        console.log(`    Created: ${s.createdAt}, Messages: ${s.messageCount}`);
+        const title = s.metadata.title || s.id;
+        console.log(`  ${chalk.yellow(s.id)} ${chalk.gray(title)}`);
+        console.log(`    Created: ${new Date(s.metadata.createdAt).toISOString()}, Messages: ${s.metadata.messageCount}`);
       }
       return;
     }
@@ -182,11 +183,11 @@ program
     if (options.show) {
       const session = sessionManager.getSession(options.show);
       if (session) {
-        console.log(chalk.cyan(`\nSession: ${session.name}`));
+        const title = session.metadata.title || session.id;
+        console.log(chalk.cyan(`\nSession: ${title}`));
         console.log(`  ID: ${session.id}`);
-        console.log(`  Created: ${new Date(session.createdAt).toISOString()}`);
-        console.log(`  Messages: ${session.state.messages.length}`);
-        console.log(`  Status: ${session.state.status}`);
+        console.log(`  Created: ${new Date(session.metadata.createdAt).toISOString()}`);
+        console.log(`  Messages: ${session.messages.length}`);
       } else {
         console.error(chalk.red('Session not found'));
       }
@@ -203,9 +204,9 @@ program
     }
 
     if (options.export) {
-      const exported = sessionManager.exportSession(options.export);
-      if (exported) {
-        console.log(exported);
+      const session = sessionManager.getSession(options.export);
+      if (session) {
+        console.log(JSON.stringify(session, null, 2));
       } else {
         console.error(chalk.red('Session not found'));
       }
@@ -215,12 +216,14 @@ program
     if (options.import) {
       try {
         const content = readFileSync(options.import, 'utf-8');
-        const session = sessionManager.importSession(content);
-        if (session) {
-          console.log(chalk.green(`Session imported: ${session.name} (${session.id})`));
-        } else {
-          console.error(chalk.red('Failed to import session'));
+        const sessionData = JSON.parse(content);
+        const session = sessionManager.createSession({ title: sessionData.name || sessionData.id });
+        if (sessionData.messages) {
+          for (const msg of sessionData.messages) {
+            sessionManager.addMessage(session.id, { role: msg.role, content: msg.content });
+          }
         }
+        console.log(chalk.green(`Session imported: ${session.id}`));
       } catch (error) {
         console.error(chalk.red('Failed to read import file:'), error);
       }
@@ -292,7 +295,7 @@ program
     console.log(chalk.green('\n✓ Diagnostics complete\n'));
   });
 
-function showBanner(): void {
+async function showBanner(): Promise<void> {
   const config = configManager.getConfig();
   const provider = configManager.getActiveProvider();
   const w = Math.min(process.stdout.columns || 80, 54);
@@ -319,8 +322,8 @@ function showBanner(): void {
   console.log(`  ${chalk.gray('Directory:')} ${chalk.white(displayPath)}${branch ? ` ${chalk.gray('⎇')} ${chalk.yellow(branch)}` : ''}`);
   console.log(`  ${chalk.gray('Memory:')}  ${chalk.green('✓ Enabled')}`);
   try {
-    const { toolRegistry } = require('../tools/index.js');
-    const tools = toolRegistry.getToolNames();
+    const { toolRegistry: registry } = await import('../tools/index.js');
+    const tools = registry.getToolNames();
     console.log(`  ${chalk.gray('Tools:')}   ${chalk.green(`${tools.length} available`)}`);
   } catch {}
   console.log('');
@@ -328,8 +331,7 @@ function showBanner(): void {
 
 function getGitBranch(): string | null {
   try {
-    const fs = require('fs');
-    const head = fs.readFileSync('.git/HEAD', 'utf-8').trim();
+    const head = readFileSync('.git/HEAD', 'utf-8').trim();
     const match = head.match(/ref: refs\/heads\/(.+)/);
     return match ? match[1] : null;
   } catch {
@@ -337,7 +339,7 @@ function getGitBranch(): string | null {
   }
 }
 
-function applyGlobalOptions(rawArgs: string[]): void {
+async function applyGlobalOptions(rawArgs: string[]): Promise<void> {
   let verbose = false;
   for (let i = 0; i < rawArgs.length; i++) {
     const arg = rawArgs[i];
@@ -350,8 +352,8 @@ function applyGlobalOptions(rawArgs: string[]): void {
     } else if (arg === '--non-interactive') {
       configManager.set('nonInteractive', true);
     } else if ((arg === '--config' || arg === '-c') && i + 1 < rawArgs.length) {
-      const { ConfigManager } = require('../config/index.js');
-      new ConfigManager(rawArgs[++i]);
+      const mod = await import('../config/index.js');
+      new mod.ConfigManager(rawArgs[++i]);
     } else if ((arg === '--model' || arg === '-m') && i + 1 < rawArgs.length) {
       configManager.set('model.model', rawArgs[++i]);
     } else if ((arg === '--provider' || arg === '-p') && i + 1 < rawArgs.length) {
@@ -375,15 +377,15 @@ async function main() {
   const hasVersionFlag = rawArgs.includes('--version') || rawArgs.includes('-V');
 
   if (hasKnownCommand || hasHelpFlag || hasVersionFlag) {
-    applyGlobalOptions(rawArgs);
+    await applyGlobalOptions(rawArgs);
     program.parse(process.argv);
     return;
   }
 
   // No command — parse global options manually, init tools, show banner, start interactive
-  applyGlobalOptions(rawArgs);
+  await applyGlobalOptions(rawArgs);
   initializeTools();
-  showBanner();
+  await showBanner();
   const interactive = new InteractiveMode();
   await interactive.start();
 }

@@ -10,6 +10,7 @@ import { handleRead, handleEdit, handleCreate, handleDelete, handleSearch, handl
 import { handleGit } from './handlers/git.js';
 import { handleMemory, handleRemember, handleForget, handleInit, handleDream } from './handlers/memory.js';
 import { handleAgents, handleArena, handleTasks, handleBackground } from './handlers/agents.js';
+import { ALL_COMMANDS, CATEGORY_ICONS } from '../ui/CommandPopup.js';
 
 const logger = getLogger('commands');
 
@@ -264,10 +265,10 @@ reg({
     const messages = agent.getMessages();
     const userMsgs = messages.filter((m) => m.role === 'user');
     const asstMsgs = messages.filter((m) => m.role === 'assistant');
-    const duration = Date.now() - session.createdAt;
+    const duration = Date.now() - (session.metadata?.createdAt || Date.now());
     tui.printLine(chalk.cyan(`\nSession Recap:`));
     tui.printLine(`  ID:       ${chalk.yellow(session.id.slice(0, 8))}`);
-    tui.printLine(`  Name:     ${chalk.yellow(session.name)}`);
+    tui.printLine(`  Name:     ${chalk.yellow(session.metadata?.title || session.id)}`);
     tui.printLine(`  Duration: ${chalk.yellow(formatDuration(duration))}`);
     tui.printLine(`  Messages: ${chalk.yellow(String(messages.length))} (${userMsgs.length} user, ${asstMsgs.length} assistant)`);
     return true;
@@ -402,12 +403,11 @@ reg({
       return true;
     }
     const toCompress = messages.slice(1, -3);
+    const lastMessages = messages.slice(-3);
     const summary = `[Context compressed: ${toCompress.length} messages summarized]`;
-    agent.reset();
-    for (const m of messages.slice(-3)) {
-      (agent as any).state.messages.push(m);
-    }
     memoryManager.addSummary(summary, 'conversation');
+    agent.reset();
+    (agent as any).state.messages.push(...lastMessages);
     tui.printLine(chalk.green(`✓ Compressed ${toCompress.length} messages into summary`));
     return true;
   },
@@ -530,9 +530,10 @@ reg({
     }
     if (args.length > 0) {
       const id = args[0];
-      const session = sessionManager.setCurrentSession(id);
-      if (session) {
-        tui.printLine(chalk.green(`✓ Resumed session: ${session.name}`));
+      const ok = sessionManager.setCurrentSession(id);
+      if (ok) {
+        const s = sessionManager.getSession(id);
+        tui.printLine(chalk.green(`✓ Resumed session: ${s?.metadata?.title || id}`));
       } else {
         tui.printLine(chalk.red(`Session not found: ${id}`));
       }
@@ -541,7 +542,7 @@ reg({
     tui.printLine(chalk.cyan('\nRecent Sessions:'));
     for (let i = 0; i < sessions.length; i++) {
       const s = sessions[i];
-      tui.printLine(`  ${chalk.yellow(String(i + 1))}. [${chalk.white(s.id.slice(0, 4))}] ${s.name} — ${s.createdAt}, ${s.messageCount} msgs`);
+      tui.printLine(`  ${chalk.yellow(String(i + 1))}. [${chalk.white(s.id.slice(0, 4))}] ${s.metadata?.title || s.id} — ${new Date(s.metadata.createdAt).toLocaleDateString()}, ${s.metadata.messageCount} msgs`);
     }
     tui.printLine(chalk.gray('\nResume which? (number or session ID):'));
     return true;
@@ -560,7 +561,7 @@ reg({
     }
     const session = sessionManager.getCurrentSession();
     if (session) {
-      sessionManager.renameSession(session.id, args.join(' '));
+      sessionManager.updateMetadata(session.id, { title: args.join(' ') });
       tui.printLine(chalk.green(`✓ Session renamed: ${args.join(' ')}`));
     } else {
       tui.printLine(chalk.yellow('No active session'));
@@ -588,7 +589,7 @@ reg({
     if (!existsSync(exportDir)) mkdirSync(exportDir, { recursive: true });
     const fileName = `session-${session.id.slice(0, 8)}-${Date.now()}`;
     if (fmt === 'html' || fmt === 'htm') {
-      const html = generateHtmlExport(session, messages);
+      const html = generateHtmlExport({ id: session.id, name: session.metadata?.title || session.id }, messages);
       writeFileSync(join(exportDir, `${fileName}.html`), html, 'utf-8');
     } else if (fmt === 'json') {
       const json = JSON.stringify({ session, messages }, null, 2);
@@ -597,7 +598,7 @@ reg({
       const lines = messages.map((m) => JSON.stringify({ role: m.role, content: m.content, timestamp: m.timestamp }));
       writeFileSync(join(exportDir, `${fileName}.jsonl`), lines.join('\n'), 'utf-8');
     } else {
-      const md = generateMdExport(session, messages);
+      const md = generateMdExport({ id: session.id, name: session.metadata?.title || session.id }, messages);
       writeFileSync(join(exportDir, `${fileName}.md`), md, 'utf-8');
     }
     tui.printLine(chalk.green(`✓ Exported session as ${fmt}`));
@@ -903,32 +904,27 @@ async function handlePlanMode(goal: string): Promise<void> {
 
 async function handleGoalMode(task: string): Promise<void> {
   tui.setStatus('thinking');
-  const steps = [
-    'Scanned project structure',
-    'Analyzing requirements',
-    'Reading relevant files',
-    'Creating implementation',
-    'Verifying changes',
-  ];
-  const progressBar = '─'.repeat(30);
-  let currentStep = 0;
-  for (const step of steps) {
-    currentStep++;
-    const pct = Math.round((currentStep / steps.length) * 100);
-    const filled = Math.round((currentStep / steps.length) * 30);
-    const bar = chalk.green('█'.repeat(filled)) + chalk.gray('░'.repeat(30 - filled));
-    tui.printLine(`  ${chalk.cyan('◆')} Goal: ${chalk.white(task)}`);
-    tui.printLine(`  ${bar} ${chalk.yellow(`${pct}%`)}`);
-    tui.printLine(`  ${chalk.green('○')} ${step}...`);
-    tui.printLine('');
-    await new Promise((r) => setTimeout(r, 300));
+  const w = Math.min(phoneConfig.terminalWidth - 2, 56);
+  tui.printLine(chalk.magenta(`\n╔═ Autonomous Execution ${'═'.repeat(Math.max(0, w - 24))}╗`));
+  tui.printLine(`║  Goal: ${chalk.white(task.slice(0, 50))}${' '.repeat(Math.max(0, w - 8 - Math.min(task.length, 50)))}║`);
+  tui.printLine(chalk.magenta(`╚${'═'.repeat(w)}╝`));
+  tui.printLine('');
+  try {
+    const result = await agent.chat(`You are in autonomous goal mode. Your task: ${task}
+Execute this task step by step using the available tools. 
+Work autonomously — read files, write code, run commands as needed.
+When done, summarize what you accomplished.`);
+    if (result.content) {
+      tui.printLine(chalk.green('\n✓ Goal execution complete'));
+      tui.printAssistant(result.content);
+    }
+  } catch (error) {
+    tui.printError(`Goal execution failed: ${error instanceof Error ? error.message : String(error)}`);
   }
-  tui.printLine(chalk.green(`✓ Goal complete: ${task}`));
   tui.setStatus('idle');
 }
 
 function showCategoryHelp(category: string): void {
-  const { ALL_COMMANDS, CATEGORY_ICONS } = require('../ui/CommandPopup.js');
   const icon = CATEGORY_ICONS[category] || ' ';
   const filtered = ALL_COMMANDS.filter((c: { category: string }) => c.category === category);
   tui.printLine(chalk.cyan(`\n${icon} ${category.toUpperCase()} Commands:`));
@@ -939,7 +935,6 @@ function showCategoryHelp(category: string): void {
 }
 
 function showSpecificHelp(command: string): void {
-  const { ALL_COMMANDS } = require('../ui/CommandPopup.js');
   const cmd = ALL_COMMANDS.find((c: { command: string }) => c.command === command);
   if (cmd) {
     tui.printLine(chalk.cyan(`\n/${cmd.command}:`));

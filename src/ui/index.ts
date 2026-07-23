@@ -2,11 +2,14 @@ import chalk from 'chalk';
 import { getLogger } from '../logger/index.js';
 import { configManager } from '../config/index.js';
 import { phoneConfig } from './phoneOptimizer.js';
-import { CommandPopup, CATEGORY_ICONS, CommandEntry } from './CommandPopup.js';
+import { CommandPopup, ALL_COMMANDS, CATEGORY_ICONS, CommandEntry } from './CommandPopup.js';
 import { generateWelcome, animateDiamond } from './WelcomeScreen.js';
 import { AgentStatus } from '../types.js';
 import { renderMarkdown } from '../utils/renderMarkdown.js';
-import { cursorTo, clearLine, moveCursor, emitKeypressEvents } from 'readline';
+import { cursorTo, clearLine, moveCursor, emitKeypressEvents, createInterface } from 'readline';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { join, dirname } from 'path';
+import { homedir } from 'os';
 
 const logger = getLogger('ui');
 
@@ -33,6 +36,20 @@ const STATUS_COLORS: Record<AgentStatus, (s: string) => string> = {
 export type ApprovalMode = 'safe' | 'normal' | 'yolo';
 export type AgentMode = 'chat' | 'plan' | 'goal' | 'review' | 'arena';
 
+export interface SessionInfo {
+  id: string;
+  name: string;
+  createdAt: number;
+  messageCount: number;
+  status: string;
+}
+
+export interface ToolResultInfo {
+  success: boolean;
+  data?: unknown;
+  error?: string;
+}
+
 export class TUI {
   private status: AgentStatus = 'idle';
   private approvalMode: ApprovalMode = 'normal';
@@ -45,11 +62,15 @@ export class TUI {
   private historyIndex = -1;
   private popupActive = false;
   private cancelRequested = false;
-
+  abortController: AbortController | null = null;
+  private renderPending = false;
   private inputBuffer = '';
   private cursorPos = 0;
   private popupLineCount = 0;
   private prevInput: string | null = null;
+  private statusBarHeight = 0;
+  private outputBuffer: string[] = [];
+  private maxOutputLines = 500;
 
   constructor() {
     this.commandPopup = new CommandPopup();
@@ -58,8 +79,6 @@ export class TUI {
 
   private loadHistory(): void {
     try {
-      const { readFileSync, existsSync } = require('fs');
-      const { join, homedir } = require('path');
       const histPath = join(homedir(), '.ys', 'history.json');
       if (existsSync(histPath)) {
         this.inputHistory = JSON.parse(readFileSync(histPath, 'utf-8'));
@@ -69,11 +88,9 @@ export class TUI {
 
   private saveHistory(): void {
     try {
-      const { writeFileSync, mkdirSync, existsSync } = require('fs');
-      const { join, homedir, dirname } = require('path');
       const histPath = join(homedir(), '.ys', 'history.json');
-      const dir = dirname(histPath);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const dirPath = dirname(histPath);
+      if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
       writeFileSync(histPath, JSON.stringify(this.inputHistory.slice(-500)), 'utf-8');
     } catch {}
   }
@@ -92,7 +109,6 @@ export class TUI {
   }
 
   private startLineMode(): void {
-    const { createInterface } = require('readline');
     const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: '' });
     rl.on('line', (line: string) => {
       const trimmed = line.trim();
@@ -115,7 +131,6 @@ export class TUI {
     this.popupLineCount = 0;
 
     process.stdin.on('keypress', this.handleKeypress.bind(this));
-
     this.renderScreen();
   }
 
@@ -136,7 +151,7 @@ export class TUI {
         this.inputBuffer = '';
         this.cursorPos = 0;
       }
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
@@ -150,7 +165,7 @@ export class TUI {
           await this.onInput(input);
         }
       }
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
@@ -159,7 +174,7 @@ export class TUI {
         this.inputBuffer = this.inputBuffer.slice(0, this.cursorPos - 1) + this.inputBuffer.slice(this.cursorPos);
         this.cursorPos--;
       }
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
@@ -173,7 +188,7 @@ export class TUI {
         this.inputBuffer = this.inputHistory[this.historyIndex];
         this.cursorPos = this.inputBuffer.length;
       }
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
@@ -188,30 +203,34 @@ export class TUI {
         }
         this.cursorPos = this.inputBuffer.length;
       }
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
     if (k === 'left') {
       if (this.cursorPos > 0) this.cursorPos--;
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
     if (k === 'right') {
       if (this.cursorPos < this.inputBuffer.length) this.cursorPos++;
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
     if (k === 'tab') {
       this.handleTab();
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
     if (c && k === 'c') {
       if (this.cancelRequested || this.status === 'thinking' || this.status === 'executing') {
+        if (this.abortController) {
+          this.abortController.abort();
+          this.abortController = null;
+        }
         if (this.onCancelRequest) this.onCancelRequest();
       } else {
         this.printLine('');
@@ -219,13 +238,13 @@ export class TUI {
         this.cancelRequested = true;
         setTimeout(() => { this.cancelRequested = false; }, 2000);
       }
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
     if (c && k === 'l') {
       this.clear();
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
@@ -236,13 +255,19 @@ export class TUI {
 
     if (c && k === 'a') {
       this.cursorPos = 0;
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
     if (c && k === 'e') {
       this.cursorPos = this.inputBuffer.length;
-      this.renderScreen();
+      this.requestRender();
+      return;
+    }
+
+    if (c && k === 'r') {
+      this.printLine(chalk.gray('🔄 Refreshing...'));
+      this.requestRender();
       return;
     }
 
@@ -267,7 +292,7 @@ export class TUI {
       }
     }
 
-    this.renderScreen();
+    this.requestRender();
   }
 
   private clearPopupLines(): void {
@@ -295,13 +320,13 @@ export class TUI {
 
     if (k === 'up') {
       this.commandPopup.moveUp();
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
     if (k === 'down') {
       this.commandPopup.moveDown();
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
@@ -331,13 +356,13 @@ export class TUI {
         this.inputBuffer = '/';
         this.cursorPos = 1;
       }
-      this.renderScreen();
+      this.requestRender();
       return;
     }
 
     if (str && str.length === 1 && str.charCodeAt(0) >= 32) {
       this.commandPopup.appendChar(str);
-      this.renderScreen();
+      this.requestRender();
       return;
     }
   }
@@ -346,7 +371,6 @@ export class TUI {
     const match = this.inputBuffer.match(/^\/?(\w*)$/);
     if (match) {
       const partial = match[1].toLowerCase();
-      const { ALL_COMMANDS } = require('./CommandPopup.js');
       const cmds = ALL_COMMANDS.map((c: CommandEntry) => c.command).filter((c: string) => c.startsWith(partial));
       if (cmds.length === 1) {
         this.inputBuffer = `/${cmds[0]} `;
@@ -357,7 +381,6 @@ export class TUI {
 
   private async openExternalEditor(): Promise<void> {
     const editor = process.env.EDITOR || 'nano';
-    const { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } = await import('fs');
     const tmpDir = '/tmp/ys-agent';
     if (!existsSync(tmpDir)) mkdirSync(tmpDir, { recursive: true });
     const tmpFile = `/tmp/ys-agent/input-${Date.now()}.md`;
@@ -372,8 +395,17 @@ export class TUI {
         this.cursorPos = content.length;
       }
     } catch {}
-    try { unlinkSync(tmpFile); } catch {}
+    try { import('fs').then(fs => fs.unlinkSync(tmpFile)); } catch {}
     this.renderScreen();
+  }
+
+  private requestRender(): void {
+    if (this.renderPending) return;
+    this.renderPending = true;
+    setImmediate(() => {
+      this.renderPending = false;
+      this.renderScreen();
+    });
   }
 
   private renderScreen(): void {
@@ -431,7 +463,10 @@ export class TUI {
     if (this.approvalMode === 'safe') approvalBadge = chalk.cyan(' [safe]');
     else if (this.approvalMode === 'yolo') approvalBadge = chalk.red(' [yolo]');
 
-    return `${statusIndicator} ${chalk.cyan('ys')} ${chalk.yellow(`[${modelShort}]`)}${modeBadge}${approvalBadge} ${chalk.gray('›')} `;
+    const provider = configManager.getActiveProvider();
+    const providerShort = provider.name.length > 10 ? provider.name.slice(0, 8) + '…' : provider.name;
+
+    return `${statusIndicator} ${chalk.cyan('ys')} ${chalk.yellow(`[${modelShort}]`)}${chalk.gray(`[${providerShort}]`)}${modeBadge}${approvalBadge} ${chalk.gray('›')} `;
   }
 
   private buildPromptLine(): string {
@@ -469,6 +504,7 @@ export class TUI {
 
   setStatus(status: AgentStatus): void {
     this.status = status;
+    this.requestRender();
   }
 
   setApprovalMode(mode: ApprovalMode): void {
@@ -527,7 +563,7 @@ export class TUI {
     this.printLine(chalk.gray(`  ⚡ ${toolName}(${argsStr}${Object.keys(args).length > 3 ? ', ...' : ''})`));
   }
 
-  printToolResult(result: { success: boolean; data?: unknown; error?: string }): void {
+  printToolResult(result: ToolResultInfo): void {
     if (result.success) {
       this.printLine(chalk.gray(`  ✓ ${chalk.green('success')}`));
     } else {
@@ -535,7 +571,18 @@ export class TUI {
     }
   }
 
-  showStatusBar(_info: { status: AgentStatus; messages: number; tokens: number; task?: string; provider?: string; model?: string }): void {
+  showStatusBar(info: { status: AgentStatus; messages: number; tokens: number; task?: string; provider?: string; model?: string }): void {
+    const w = Math.max(Math.min(process.stdout.columns || 80, 60), 20);
+    const top = `┌${'─'.repeat(w)}┐`;
+    const bottom = `└${'─'.repeat(w)}┘`;
+
+    const statusStr = `${STATUS_COLORS[info.status](INDICATORS[info.status])} ${info.status}`;
+    const msgStr = chalk.gray(`${info.messages} msgs`);
+    const tokenStr = chalk.gray(`${(info.tokens / 1000).toFixed(1)}k tokens`);
+
+    this.printLine(top);
+    this.printLine(`│ ${statusStr} ${msgStr} ${tokenStr} │`);
+    this.printLine(bottom);
   }
 
   printWelcome(): void {
@@ -554,13 +601,12 @@ export class TUI {
   }
 
   printHelp(): void {
-    const { ALL_COMMANDS } = require('./CommandPopup.js');
     const w = Math.max(Math.min(process.stdout.columns || 80, 72), 30);
     const top = `╔${'═'.repeat(w)}╗`;
     const bottom = `╚${'═'.repeat(w)}╝`;
 
     const lines: string[] = [top];
-    const title = ` YS Code Agent — Commands `;
+    const title = ` YS Code Agent v4.0 — Commands `;
     const titlePad = Math.max(0, Math.floor((w - title.length) / 2));
     lines.push(`║${' '.repeat(titlePad)}${chalk.cyan(title)}${' '.repeat(Math.max(0, w - titlePad - title.length))}║`);
     lines.push(`╠${'═'.repeat(w)}╣`);
@@ -596,6 +642,7 @@ export class TUI {
       ['Ctrl+A', 'Line start'],
       ['Ctrl+E', 'Line end'],
       ['Ctrl+X', 'Open editor'],
+      ['Ctrl+R', 'Refresh'],
       ['Esc', 'Cancel / clear input'],
     ];
     for (const [key, desc] of shortcuts) {
@@ -624,7 +671,11 @@ export class TUI {
   }
 
   getOutputLineCount(): number {
-    return 0;
+    return this.outputBuffer.length;
+  }
+
+  printStatus(status: string): void {
+    this.printLine(chalk.gray(`[${status}]`));
   }
 }
 

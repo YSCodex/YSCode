@@ -154,6 +154,7 @@ export interface ToolParameter {
   enum?: string[];
   minimum?: number;
   maximum?: number;
+  properties?: Record<string, Record<string, unknown>>;
 }
 
 export interface ToolCall {

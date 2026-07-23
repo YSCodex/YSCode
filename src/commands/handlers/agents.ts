@@ -100,12 +100,41 @@ async function arenaStart(prompt: string): Promise<boolean> {
     tui.printLine(chalk.cyan(`╚${'═'.repeat(w)}╝`));
     return true;
   }
+  const results: Array<{ name: string; content: string; time: number }> = [];
   for (const m of models) {
-    tui.printLine(`║  ${chalk.yellow(m.name.padEnd(16))} ${chalk.cyan('████████░░')}  ${chalk.gray('streaming...')}${' '.repeat(Math.max(0, w - 40))}║`);
+    tui.printLine(`║  ${chalk.yellow(m.name.padEnd(16))} ${chalk.cyan('⟳')} ${chalk.gray('querying...')}${' '.repeat(Math.max(0, w - 37))}║`);
   }
   tui.printLine(chalk.cyan(`╚${'═'.repeat(w)}╝`));
-  tui.printLine(chalk.gray('\n  Running models in parallel...'));
-  tui.printLine(chalk.gray('  (Full multi-model arena requires additional API setup)'));
+  for (let i = 0; i < models.length; i++) {
+    const m = models[i];
+    tui.printLine(chalk.gray(`  [${i + 1}/${models.length}] ${m.name}...`));
+    const startTime = Date.now();
+    try {
+      const { createProvider } = await import('../../providers/index.js');
+      const provConfig = configManager.getProvider(m.provider);
+      if (!provConfig) {
+        tui.printLine(chalk.red(`  ✗ Provider ${m.provider} not configured`));
+        continue;
+      }
+      const tempConfig = { ...provConfig, defaultModel: m.model };
+      const modelCfg = { provider: provConfig.type, model: m.model, temperature: 0.7, maxTokens: 2048, topP: 1, frequencyPenalty: 0, presencePenalty: 0, stop: [] as string[] };
+      const provider = createProvider(tempConfig, modelCfg);
+      const response = await provider.generate([{ role: 'user', content: prompt }]);
+      const duration = Date.now() - startTime;
+      results.push({ name: m.name, content: response.content, time: duration });
+      tui.printLine(chalk.green(`  ✓ ${m.name} responded in ${(duration / 1000).toFixed(1)}s`));
+    } catch (e) {
+      tui.printLine(chalk.red(`  ✗ ${m.name}: ${e instanceof Error ? e.message : String(e)}`));
+    }
+  }
+  tui.printLine(chalk.cyan(`\n╔═ Arena Results ${'═'.repeat(Math.max(0, w - 15))}╗`));
+  for (const r of results) {
+    const preview = r.content.slice(0, 200).replace(/\n/g, ' ');
+    tui.printLine(`║  ${chalk.yellow(r.name.padEnd(16))} ${chalk.gray(`(${(r.time / 1000).toFixed(1)}s)`)} ║`);
+    tui.printLine(`║  ${chalk.white(preview)}${preview.length >= 200 ? '…' : ''}${' '.repeat(Math.max(0, w - Math.min(preview.length, 200) - 5))}║`);
+    tui.printLine(`║${' '.repeat(w)}║`);
+  }
+  tui.printLine(chalk.cyan(`╚${'═'.repeat(w)}╝`));
   return true;
 }
 
@@ -125,15 +154,69 @@ export async function handleTasks(args: string[]): Promise<boolean> {
   return true;
 }
 
+interface BgTask {
+  id: string;
+  command: string;
+  pid: number | null;
+  status: 'running' | 'completed' | 'failed';
+  startTime: number;
+  output: string[];
+}
+
+const bgTasks: BgTask[] = [];
+let bgTaskId = 0;
+
 export async function handleBackground(args: string[]): Promise<boolean> {
   if (args.length === 0) {
     tui.printLine(chalk.red('Usage: /background <command>'));
     tui.printLine(chalk.gray('  Example: /background npm test'));
+    tui.printLine(chalk.gray('  /background list — List background tasks'));
+    return true;
+  }
+  if (args[0] === 'list' || args[0] === 'ls') {
+    if (bgTasks.length === 0) {
+      tui.printLine(chalk.gray('No background tasks'));
+      return true;
+    }
+    tui.printLine(chalk.cyan('\nBackground Tasks:'));
+    for (const t of bgTasks) {
+      const elapsed = ((Date.now() - t.startTime) / 1000).toFixed(1);
+      const statusColor = t.status === 'running' ? chalk.cyan : t.status === 'completed' ? chalk.green : chalk.red;
+      tui.printLine(`  [${t.id}] ${statusColor(t.status)} ${chalk.white(t.command.slice(0, 40))} ${chalk.gray(`(${elapsed}s)`)}`);
+      if (t.output.length > 0) {
+        for (const line of t.output.slice(-3)) {
+          tui.printLine(`       ${chalk.gray(line.slice(0, 80))}`);
+        }
+      }
+    }
     return true;
   }
   const cmd = args.join(' ');
   tui.printLine(chalk.gray(`\n  Running in background: ${cmd}`));
-  tui.printLine(chalk.gray('  (Background task execution requires worker thread setup)'));
-  // TODO: Implement actual worker thread execution
+  const task: BgTask = { id: String(++bgTaskId), command: cmd, pid: null, status: 'running', startTime: Date.now(), output: [] };
+  bgTasks.push(task);
+  const { spawn } = await import('child_process');
+  const proc = spawn('bash', ['-c', cmd], { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  task.pid = proc.pid ?? null;
+  proc.stdout?.on('data', (data: Buffer) => {
+    task.output.push(data.toString().trim());
+    if (task.output.length > 100) task.output.shift();
+  });
+  proc.stderr?.on('data', (data: Buffer) => {
+    task.output.push(data.toString().trim());
+    if (task.output.length > 100) task.output.shift();
+  });
+  proc.on('exit', (code) => {
+    task.status = code === 0 ? 'completed' : 'failed';
+    tui.printLine(chalk.gray(`  [${task.id}] ${task.command.slice(0, 40)} → ${task.status} (exit code ${code})`));
+  });
+  proc.on('error', (err) => {
+    task.status = 'failed';
+    task.output.push(`Error: ${err.message}`);
+    tui.printLine(chalk.red(`  [${task.id}] Error: ${err.message}`));
+  });
+  proc.unref();
+  tui.printLine(chalk.green(`  ✓ Task [${task.id}] started (PID: ${task.pid})`));
+  tui.printLine(chalk.gray(`  /background list — check status`));
   return true;
 }

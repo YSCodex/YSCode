@@ -2,6 +2,9 @@ import { configManager } from '../config/index.js';
 import { getLogger } from '../logger/index.js';
 import { AgentMessage, Summary, MemoryData, TaskRecord } from '../types.js';
 import { generateId, countTokens } from '../utils/index.js';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 
 const logger = getLogger('memory');
 
@@ -12,6 +15,14 @@ interface MemoryEntry {
   timestamp: number;
 }
 
+interface PersistedMemoryData {
+  inMemory: Array<{ key: string; value: string; type: string; timestamp: number }>;
+  summaries: Summary[];
+  preferences: Record<string, unknown>;
+  previousTasks: TaskRecord[];
+  shortTerm: AgentMessage[];
+}
+
 export class MemoryManager {
   private shortTerm: AgentMessage[] = [];
   private maxShortTerm: number;
@@ -20,11 +31,49 @@ export class MemoryManager {
   private summaries: Summary[] = [];
   private preferences: Record<string, unknown> = {};
   private previousTasks: TaskRecord[] = [];
+  private memoryFilePath: string;
 
   constructor() {
     const config = configManager.getConfig();
     this.maxShortTerm = config.memory.shortTermSize;
     this.longTermEnabled = config.memory.longTermEnabled;
+    this.memoryFilePath = join(homedir(), '.ys', 'memory.json');
+    this.load();
+  }
+
+  private getSaveData(): PersistedMemoryData {
+    return {
+      inMemory: [...this.inMemory.values()],
+      summaries: this.summaries,
+      preferences: this.preferences,
+      previousTasks: this.previousTasks,
+      shortTerm: this.shortTerm,
+    };
+  }
+
+  private save(): void {
+    try {
+      const dir = join(homedir(), '.ys');
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      writeFileSync(this.memoryFilePath, JSON.stringify(this.getSaveData(), null, 2), 'utf-8');
+    } catch (e) {
+      logger.warn('Failed to save memory', { error: String(e) });
+    }
+  }
+
+  private load(): void {
+    try {
+      if (!existsSync(this.memoryFilePath)) return;
+      const data = JSON.parse(readFileSync(this.memoryFilePath, 'utf-8')) as PersistedMemoryData;
+      this.inMemory = new Map(data.inMemory.map((e) => [e.key, e]));
+      this.summaries = data.summaries || [];
+      this.preferences = data.preferences || {};
+      this.previousTasks = data.previousTasks || [];
+      this.shortTerm = data.shortTerm || [];
+      logger.info(`Loaded ${this.inMemory.size} memory entries, ${this.summaries.length} summaries`);
+    } catch (e) {
+      logger.warn('Failed to load memory, starting fresh', { error: String(e) });
+    }
   }
 
   addMessage(message: AgentMessage): void {
@@ -32,6 +81,7 @@ export class MemoryManager {
     if (this.shortTerm.length > this.maxShortTerm) {
       this.shortTerm.shift();
     }
+    this.save();
   }
 
   getMessages(count?: number): AgentMessage[] {
@@ -43,6 +93,7 @@ export class MemoryManager {
 
   clearMessages(): void {
     this.shortTerm = [];
+    this.save();
   }
 
   getContext(): MemoryData {
@@ -68,6 +119,7 @@ export class MemoryManager {
     }
 
     logger.debug(`Stored memory: ${key} (${type})`);
+    this.save();
   }
 
   retrieve(key: string): { value: string; type: string } | null {
@@ -96,6 +148,7 @@ export class MemoryManager {
 
   delete(key: string): void {
     this.inMemory.delete(key);
+    this.save();
   }
 
   clear(): void {
@@ -104,6 +157,7 @@ export class MemoryManager {
     this.summaries = [];
     this.previousTasks = [];
     this.preferences = {};
+    this.save();
   }
 
   list(type?: string): MemoryEntry[] {
@@ -126,6 +180,7 @@ export class MemoryManager {
     if (this.summaries.length > 100) {
       this.summaries.pop();
     }
+    this.save();
   }
 
   getSummaries(type?: string, limit = 10): Summary[] {
@@ -166,6 +221,7 @@ export class MemoryManager {
     if (this.previousTasks.length > 100) {
       this.previousTasks.pop();
     }
+    this.save();
   }
 
   getRecentTasks(count = 10): TaskRecord[] {

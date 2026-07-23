@@ -1,231 +1,379 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from 'fs';
-import { join, dirname } from 'path';
-import { getLogger } from '../logger/index.js';
-import { configManager } from '../config/index.js';
-import { SessionData, AgentState } from '../types.js';
-import { generateId, formatDate } from '../utils/index.js';
+import { EventEmitter } from 'events';
+import * as fs from 'fs';
+import * as path from 'path';
+import crypto from 'crypto';
 
-const logger = getLogger('session');
 
-export class SessionManager {
+export interface SessionMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  timestamp: number;
+  toolCallId?: string;
+  toolName?: string;
+}
+
+export interface SessionMetadata {
+  createdAt: number;
+  updatedAt: number;
+  lastAccessed: number;
+  messageCount: number;
+  totalTokens?: number;
+  title?: string;
+  tags?: string[];
+}
+
+export interface Session {
+  id: string;
+  messages: SessionMessage[];
+  metadata: SessionMetadata;
+  context: Record<string, unknown>;
+}
+
+export interface SessionManagerOptions {
+  sessionDir?: string;
+  maxSessions?: number;
+  maxMessagesPerSession?: number;
+  enablePersistence?: boolean;
+  autoCompactThreshold?: number;
+}
+
+export class SessionManager extends EventEmitter {
+  private static instance: SessionManager;
+  private sessions: Map<string, Session> = new Map();
+  private currentSessionId: string | null = null;
   private sessionDir: string;
   private maxSessions: number;
-  private autoSave: boolean;
-  private saveInterval: number;
-  private currentSession: SessionData | null = null;
-  private sessions: Map<string, SessionData> = new Map();
-  private saveTimer: ReturnType<typeof setInterval> | null = null;
+  private maxMessagesPerSession: number;
+  private enablePersistence: boolean;
+  private autoCompactThreshold: number;
 
-  constructor() {
-    const config = configManager.getConfig();
-    this.sessionDir = config.session.sessionDir;
-    this.maxSessions = config.session.maxSessions;
-    this.autoSave = config.session.autoSave;
-    this.saveInterval = config.session.saveInterval;
+  constructor(options: SessionManagerOptions = {}) {
+    super();
+    this.sessionDir = options.sessionDir || path.join(process.cwd(), '.ys-agent', 'sessions');
+    this.maxSessions = options.maxSessions ?? 50;
+    this.maxMessagesPerSession = options.maxMessagesPerSession ?? 1000;
+    this.enablePersistence = options.enablePersistence ?? true;
+    this.autoCompactThreshold = options.autoCompactThreshold ?? 0.8;
 
-    this.init();
+    if (this.enablePersistence) {
+      this.ensureSessionDir();
+      this.loadSessions();
+    }
   }
 
-  private init(): void {
-    if (!existsSync(this.sessionDir)) {
-      mkdirSync(this.sessionDir, { recursive: true });
+  static getInstance(options?: SessionManagerOptions): SessionManager {
+    if (!SessionManager.instance) {
+      SessionManager.instance = new SessionManager(options);
     }
+    return SessionManager.instance;
+  }
 
-    this.loadSessions();
-
-    if (this.autoSave) {
-      this.saveTimer = setInterval(() => {
-        this.saveCurrentSession();
-      }, this.saveInterval);
+  private ensureSessionDir(): void {
+    if (!fs.existsSync(this.sessionDir)) {
+      fs.mkdirSync(this.sessionDir, { recursive: true });
     }
+  }
 
-    logger.info(`Session manager initialized (${this.sessions.size} sessions)`);
+  private getSessionPath(sessionId: string): string {
+    return path.join(this.sessionDir, `${sessionId}.json`);
   }
 
   private loadSessions(): void {
     try {
-      const files = readdirSync(this.sessionDir)
-        .filter((f) => f.endsWith('.json'))
-        .sort()
-        .reverse();
+      if (!fs.existsSync(this.sessionDir)) return;
 
-      for (const file of files.slice(0, this.maxSessions)) {
+      const files = fs.readdirSync(this.sessionDir);
+      for (const file of files) {
+        if (!file.endsWith('.json')) continue;
+
         try {
-          const content = readFileSync(join(this.sessionDir, file), 'utf-8');
-          const session = JSON.parse(content) as SessionData;
+          const content = fs.readFileSync(path.join(this.sessionDir, file), 'utf-8');
+          const session: Session = JSON.parse(content);
           this.sessions.set(session.id, session);
-        } catch (err) {
-          logger.warn(`Failed to load session file: ${file}`, err);
+        } catch (error) {
+          console.error(`Failed to load session from ${file}:`, error);
         }
       }
+
+      this.emit('sessions:loaded', this.sessions.size);
     } catch (error) {
-      logger.error('Failed to load sessions', error);
+      console.error('Failed to load sessions:', error);
     }
   }
 
-  createSession(name?: string): SessionData {
-    const session: SessionData = {
-      id: generateId(24),
-      name: name || `Session ${formatDate(Date.now())}`,
-      state: this.createEmptyState(),
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+  private saveSession(session: Session): void {
+    if (!this.enablePersistence) return;
+
+    try {
+      this.ensureSessionDir();
+      const sessionPath = this.getSessionPath(session.id);
+      fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2), 'utf-8');
+    } catch (error) {
+      console.error(`Failed to save session ${session.id}:`, error);
+    }
+  }
+
+  private deleteSessionFile(sessionId: string): void {
+    try {
+      const sessionPath = this.getSessionPath(sessionId);
+      if (fs.existsSync(sessionPath)) {
+        fs.unlinkSync(sessionPath);
+      }
+    } catch (error) {
+      console.error(`Failed to delete session file ${sessionId}:`, error);
+    }
+  }
+
+  createSession(options?: { title?: string; tags?: string[]; context?: Record<string, unknown> }): Session {
+    const id = crypto.randomUUID();
+    const now = Date.now();
+
+    const session: Session = {
+      id,
+      messages: [],
+      metadata: {
+        createdAt: now,
+        updatedAt: now,
+        lastAccessed: now,
+        messageCount: 0,
+        title: options?.title,
+        tags: options?.tags,
+      },
+      context: options?.context || {},
     };
 
-    this.sessions.set(session.id, session);
-    this.currentSession = session;
-    this.saveSession(session);
+    this.sessions.set(id, session);
+    this.currentSessionId = id;
 
-    logger.info(`Created session: ${session.id} (${session.name})`);
+    this.emit('session:created', session);
+
+    if (this.sessions.size > this.maxSessions) {
+      this.cleanupOldSessions();
+    }
+
     return session;
   }
 
-  private createEmptyState(): AgentState {
-    return {
-      task: '',
-      plan: [],
-      currentStep: 0,
-      messages: [],
-      context: {
-        currentDirectory: process.cwd(),
-        openFiles: [],
-        recentFiles: [],
-        projectStructure: [],
-        environment: {},
-        tokenCount: 0,
-      },
-      memory: {
-        shortTerm: { messages: [], maxSize: 100 },
-        longTerm: { summaries: [], preferences: {}, previousTasks: [] },
-      },
-      status: 'idle',
-      startTime: Date.now(),
-    };
-  }
-
-  getCurrentSession(): SessionData | null {
-    return this.currentSession;
-  }
-
-  setCurrentSession(sessionId: string): SessionData | null {
+  getSession(sessionId: string): Session | undefined {
     const session = this.sessions.get(sessionId);
     if (session) {
-      this.currentSession = session;
-      return session;
-    }
-    return null;
-  }
-
-  getSession(sessionId: string): SessionData | null {
-    return this.sessions.get(sessionId) || null;
-  }
-
-  getAllSessions(): SessionData[] {
-    return [...this.sessions.values()]
-      .sort((a, b) => b.updatedAt - a.updatedAt);
-  }
-
-  updateSessionState(state: AgentState): void {
-    if (this.currentSession) {
-      this.currentSession.state = state;
-      this.currentSession.updatedAt = Date.now();
-    }
-  }
-
-  saveCurrentSession(): void {
-    if (this.currentSession) {
-      this.saveSession(this.currentSession);
-    }
-  }
-
-  private saveSession(session: SessionData): void {
-    try {
-      const filePath = join(this.sessionDir, `${session.id}.json`);
-      writeFileSync(filePath, JSON.stringify(session, null, 2), 'utf-8');
-    } catch (error) {
-      logger.error('Failed to save session', error);
-    }
-  }
-
-  deleteSession(sessionId: string): boolean {
-    const session = this.sessions.get(sessionId);
-    if (!session) return false;
-
-    try {
-      const filePath = join(this.sessionDir, `${sessionId}.json`);
-      if (existsSync(filePath)) {
-        unlinkSync(filePath);
-      }
-      this.sessions.delete(sessionId);
-
-      if (this.currentSession?.id === sessionId) {
-        this.currentSession = null;
-      }
-
-      logger.info(`Deleted session: ${sessionId}`);
-      return true;
-    } catch (error) {
-      logger.error('Failed to delete session', error);
-      return false;
-    }
-  }
-
-  renameSession(sessionId: string, newName: string): boolean {
-    const session = this.sessions.get(sessionId);
-    if (session) {
-      session.name = newName;
-      session.updatedAt = Date.now();
+      session.metadata.lastAccessed = Date.now();
       this.saveSession(session);
+    }
+    return session;
+  }
+
+  getCurrentSession(): Session | undefined {
+    if (!this.currentSessionId) return undefined;
+    return this.sessions.get(this.currentSessionId);
+  }
+
+  setCurrentSession(sessionId: string): boolean {
+    if (this.sessions.has(sessionId)) {
+      this.currentSessionId = sessionId;
+      const session = this.sessions.get(sessionId)!;
+      session.metadata.lastAccessed = Date.now();
+      this.saveSession(session);
+      this.emit('session:activated', session);
       return true;
     }
     return false;
   }
 
-  exportSession(sessionId: string): string | null {
-    const session = this.sessions.get(sessionId);
-    if (session) {
-      return JSON.stringify(session, null, 2);
+  deleteSession(sessionId: string): boolean {
+    if (this.sessions.has(sessionId)) {
+      this.sessions.delete(sessionId);
+      this.deleteSessionFile(sessionId);
+
+      if (this.currentSessionId === sessionId) {
+        this.currentSessionId = null;
+      }
+
+      this.emit('session:deleted', sessionId);
+      return true;
     }
-    return null;
+    return false;
   }
 
-  importSession(json: string): SessionData | null {
+  addMessage(sessionId: string, message: Omit<SessionMessage, 'timestamp'>): SessionMessage {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const fullMessage: SessionMessage = {
+      ...message,
+      timestamp: Date.now(),
+    };
+
+    session.messages.push(fullMessage);
+    session.metadata.messageCount++;
+    session.metadata.updatedAt = Date.now();
+
+    if (session.messages.length > this.maxMessagesPerSession) {
+      session.messages = session.messages.slice(-this.maxMessagesPerSession);
+    }
+
+    this.saveSession(session);
+    this.emit('message:added', { sessionId, message: fullMessage });
+
+    return fullMessage;
+  }
+
+  getMessages(sessionId: string, options?: { limit?: number; offset?: number }): SessionMessage[] {
+    const session = this.sessions.get(sessionId);
+    if (!session) return [];
+
+    let messages = session.messages;
+    if (options?.offset) {
+      messages = messages.slice(options.offset);
+    }
+    if (options?.limit) {
+      messages = messages.slice(-options.limit);
+    }
+
+    return messages;
+  }
+
+  updateMetadata(sessionId: string, metadata: Partial<SessionMetadata>): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+
+    session.metadata = { ...session.metadata, ...metadata };
+    session.metadata.updatedAt = Date.now();
+    this.saveSession(session);
+    this.emit('session:updated', { sessionId, metadata });
+    return true;
+  }
+
+  updateContext(sessionId: string, context: Record<string, unknown>): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+
+    session.context = { ...session.context, ...context };
+    this.saveSession(session);
+    this.emit('session:context_updated', { sessionId, context });
+    return true;
+  }
+
+  listSessions(options?: { sortBy?: 'createdAt' | 'updatedAt' | 'lastAccessed'; limit?: number }): Session[] {
+    let sessions = Array.from(this.sessions.values());
+
+    const sortBy = options?.sortBy ?? 'lastAccessed';
+    sessions.sort((a, b) => b.metadata[sortBy] - a.metadata[sortBy]);
+
+    if (options?.limit) {
+      sessions = sessions.slice(0, options.limit);
+    }
+
+    return sessions;
+  }
+
+  async compactSession(sessionId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+
+    if (session.messages.length <= 10) {
+      return false;
+    }
+
+    const compactedMessages = this.performCompaction(session.messages);
+    session.messages = compactedMessages;
+    session.metadata.messageCount = compactedMessages.length;
+    session.metadata.updatedAt = Date.now();
+
+    this.saveSession(session);
+    this.emit('session:compacted', { sessionId, originalCount: session.messages.length });
+    return true;
+  }
+
+  private performCompaction(messages: SessionMessage[]): SessionMessage[] {
+    if (messages.length <= 10) return messages;
+
+    const head = messages.slice(0, 5);
+    const tail = messages.slice(-5);
+
+    return [...head, ...tail];
+  }
+
+  private cleanupOldSessions(): void {
+    const sessions = this.listSessions({ sortBy: 'lastAccessed' });
+    const toDelete = sessions.slice(this.maxSessions);
+
+    for (const session of toDelete) {
+      this.deleteSession(session.id);
+    }
+
+    this.emit('sessions:cleanup', toDelete.length);
+  }
+
+  async checkAndCompact(sessionId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+
+    const utilization = session.messages.length / this.maxMessagesPerSession;
+    if (utilization >= this.autoCompactThreshold) {
+      return this.compactSession(sessionId);
+    }
+
+    return false;
+  }
+
+  exportSession(sessionId: string, filePath: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+
     try {
-      const session = JSON.parse(json) as SessionData;
-      session.id = generateId(24);
-      session.createdAt = Date.now();
-      session.updatedAt = Date.now();
+      fs.writeFileSync(filePath, JSON.stringify(session, null, 2), 'utf-8');
+      this.emit('session:exported', { sessionId, filePath });
+      return true;
+    } catch (error) {
+      console.error(`Failed to export session ${sessionId}:`, error);
+      return false;
+    }
+  }
+
+  importSession(filePath: string): Session | null {
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const session: Session = JSON.parse(content);
+
+      if (this.sessions.has(session.id)) {
+        session.id = crypto.randomUUID();
+      }
 
       this.sessions.set(session.id, session);
       this.saveSession(session);
-
-      logger.info(`Imported session: ${session.id} (${session.name})`);
+      this.emit('session:imported', session);
       return session;
     } catch (error) {
-      logger.error('Failed to import session', error);
+      console.error('Failed to import session:', error);
       return null;
     }
   }
 
-  getSessionCount(): number {
-    return this.sessions.size;
+  clear(): void {
+    this.sessions.clear();
+    this.currentSessionId = null;
+    this.emit('sessions:cleared');
   }
 
-  listSessions(): Array<{ id: string; name: string; createdAt: string; messageCount: number }> {
-    return this.getAllSessions().map((s) => ({
-      id: s.id,
-      name: s.name,
-      createdAt: formatDate(s.createdAt),
-      messageCount: s.state.messages.length,
-    }));
-  }
-
-  destroy(): void {
-    if (this.saveTimer) {
-      clearInterval(this.saveTimer);
+  getStats(): {
+    totalSessions: number;
+    currentSessionId: string | null;
+    totalMessages: number;
+  } {
+    let totalMessages = 0;
+    for (const session of this.sessions.values()) {
+      totalMessages += session.messages.length;
     }
-    this.saveCurrentSession();
+
+    return {
+      totalSessions: this.sessions.size,
+      currentSessionId: this.currentSessionId,
+      totalMessages,
+    };
   }
 }
 
-export const sessionManager = new SessionManager();
+export const sessionManager = SessionManager.getInstance();

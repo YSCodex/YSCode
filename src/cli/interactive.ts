@@ -86,23 +86,34 @@ export class InteractiveMode {
     if (!message.trim()) return;
     tui.setStatus('thinking');
     tui.printLine('');
-    tui.printLine(chalk.gray('  ◐ Processing...'));
+    const abortController = new AbortController();
+    tui.abortController = abortController;
     try {
       const startTime = Date.now();
-      const resultText = await this.agentManager.chat(message);
+      const stream = agent.chatStream(message);
+      let fullContent = '';
+      tui.printLine(chalk.gray('  ─'));
+      process.stdout.write('  ');
+      for await (const chunk of stream) {
+        if (abortController.signal.aborted) break;
+        fullContent += chunk;
+        process.stdout.write(chunk);
+      }
       const duration = Date.now() - startTime;
       tui.setStatus('completed');
       tui.printLine('');
-      if (resultText) {
-        tui.printAssistant(resultText);
-      }
       this.showStatusLine(duration);
     } catch (error) {
-      tui.setStatus('error');
-      const msg = error instanceof Error ? error.message : String(error);
-      tui.printError(msg);
-      logger.error('Chat error', error);
+      if (abortController.signal.aborted) {
+        tui.printLine(chalk.yellow('\n⚠ Cancelled'));
+      } else {
+        tui.setStatus('error');
+        const msg = error instanceof Error ? error.message : String(error);
+        tui.printError(msg);
+        logger.error('Chat error', error);
+      }
     }
+    tui.abortController = null;
     tui.setStatus('idle');
   }
 

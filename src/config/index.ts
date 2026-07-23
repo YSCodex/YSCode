@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { Config, ProviderConfig, ModelConfig } from '../types.js';
+export type { Config } from '../types.js';
 
 const DEFAULT_CONFIG_PATH = join(homedir(), '.ys-code-agent', 'config.json');
 

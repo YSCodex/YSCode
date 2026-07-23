@@ -1,27 +1,16 @@
 import { configManager } from '../config/index.js';
 import { getLogger } from '../logger/index.js';
 import { agent } from '../agent/index.js';
-import { ToolResult, AgentMessage } from '../types.js';
 
 const logger = getLogger('cli-agent');
 
 export class AgentManager {
   async executeTask(task: string, timeoutMs = 300000): Promise<string> {
     logger.info(`Executing task: ${task.slice(0, 100)}`);
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error(`Task timed out after ${timeoutMs}ms`)), timeoutMs);
-    });
-
+    const timeoutPromise = new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Task timed out after ${timeoutMs}ms`)), timeoutMs));
     const taskPromise = this.runTask(task);
-
-    try {
-      const result = await Promise.race([taskPromise, timeoutPromise]);
-      return result;
-    } catch (error) {
-      logger.error('Task execution failed', error);
-      throw error;
-    }
+    try { return await Promise.race([taskPromise, timeoutPromise]); }
+    catch (error) { logger.error('Task execution failed', error); throw error; }
   }
 
   private async runTask(task: string): Promise<string> {
@@ -34,15 +23,16 @@ export class AgentManager {
     return result.content;
   }
 
-  reset(): void {
-    agent.reset();
+  async *chatStream(message: string): AsyncGenerator<string, void, void> {
+    const gen = agent.chatStream(message);
+    while (true) {
+      const next = await gen.next();
+      if (next.done) break;
+      yield next.value as string;
+    }
   }
 
-  getState() {
-    return agent.getState();
-  }
-
-  getMessages() {
-    return agent.getMessages();
-  }
+  reset(): void { agent.reset(); }
+  getState() { return agent.getState(); }
+  getMessages() { return agent.getMessages(); }
 }

@@ -1,6 +1,8 @@
 import chalk from 'chalk';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync, renameSync } from 'fs';
 import { join, relative, resolve, basename, dirname, extname, sep } from 'path';
+import { createInterface } from 'readline';
+import { glob } from 'fast-glob';
 import { tui } from '../../ui/index.js';
 import { agent } from '../../agent/index.js';
 import { isBinaryFile, formatBytes, getLanguageFromExtension, truncate } from '../../utils/index.js';
@@ -165,8 +167,6 @@ export async function handleSearch(args: string[]): Promise<boolean> {
   const extFilter = args.indexOf('--ext') >= 0 ? args[args.indexOf('--ext') + 1] : null;
   tui.printLine(chalk.cyan(`\nSearching for: ${chalk.white(query)}`));
   try {
-    const { glob } = require('fast-glob');
-    const { readFileSync } = require('fs');
     const patterns = extFilter ? [`**/*.${extFilter}`] : ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx', '**/*.py', '**/*.json', '**/*.md', '**/*.html', '**/*.css'];
     const ignore = ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/build/**'];
     const files = await glob(patterns, { ignore, cwd: process.cwd() });
@@ -338,7 +338,6 @@ function getTemplate(ext: string): string {
 
 function promptConfirm(defaultYes: boolean): Promise<boolean> {
   return new Promise((resolve) => {
-    const { createInterface } = require('readline');
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const prompt = defaultYes ? '[Y/n] ' : '[y/N] ';
     rl.question(prompt, (answer: string) => {

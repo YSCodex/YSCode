@@ -154,9 +154,9 @@ function isGitRepo(): boolean {
 
 function countActiveTools(): number {
   try {
-    const { initializeTools } = require('../tools/declarative/index.js');
-    const reg = initializeTools();
-    return reg.getToolCount();
+    const { toolRegistry } = require('../tools/index.js');
+    const names = toolRegistry.getToolNames();
+    return names.length;
   } catch {
     return 10;
   }

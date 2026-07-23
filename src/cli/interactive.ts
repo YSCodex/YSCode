@@ -15,6 +15,8 @@ const logger = getLogger('interactive');
 export class InteractiveMode {
   private agentManager: AgentManager;
   private running = true;
+  private inputHistory: string[] = [];
+  private abortController: AbortController | null = null;
 
   constructor() {
     this.agentManager = new AgentManager();
@@ -22,10 +24,12 @@ export class InteractiveMode {
 
   async start(initialMessage?: string): Promise<void> {
     logger.info('Starting interactive mode');
+    tui.start();
+    tui.printWelcome();
     this.checkApiKey();
     await this.initProject();
-    tui.start();
     tui.setOnInput(async (input) => {
+      if (input.trim()) this.inputHistory.push(input.trim());
       await this.handleInput(input);
     });
     tui.setOnCancelRequest(() => {
@@ -78,34 +82,34 @@ export class InteractiveMode {
   }
 
   private handleCancel(): void {
-    tui.printLine(chalk.yellow('\n⚠ Request cancelled'));
+    if (this.abortController) { this.abortController.abort(); this.abortController = null; }
+    tui.finalizeStream();
+    tui.printLine(chalk.yellow('⚠ Request cancelled'));
     tui.setStatus('idle');
   }
 
   private async handleMessage(message: string): Promise<void> {
     if (!message.trim()) return;
+    tui.addOutput(chalk.white(`You: ${message}`), 'user');
     tui.setStatus('thinking');
-    tui.printLine('');
-    const abortController = new AbortController();
-    tui.abortController = abortController;
+    this.abortController = new AbortController();
+    tui.abortController = this.abortController;
     try {
       const startTime = Date.now();
       const stream = agent.chatStream(message);
       let fullContent = '';
-      tui.printLine(chalk.gray('  ─'));
-      process.stdout.write('  ');
       for await (const chunk of stream) {
-        if (abortController.signal.aborted) break;
+        if (this.abortController.signal.aborted) break;
         fullContent += chunk;
-        process.stdout.write(chunk);
+        tui.writeStream(chunk);
       }
+      tui.finalizeStream();
       const duration = Date.now() - startTime;
       tui.setStatus('completed');
-      tui.printLine('');
       this.showStatusLine(duration);
     } catch (error) {
-      if (abortController.signal.aborted) {
-        tui.printLine(chalk.yellow('\n⚠ Cancelled'));
+      if (this.abortController?.signal.aborted) {
+        tui.printLine(chalk.yellow('⚠ Cancelled'));
       } else {
         tui.setStatus('error');
         const msg = error instanceof Error ? error.message : String(error);
@@ -114,6 +118,7 @@ export class InteractiveMode {
       }
     }
     tui.abortController = null;
+    this.abortController = null;
     tui.setStatus('idle');
   }
 

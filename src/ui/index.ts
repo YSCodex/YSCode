@@ -78,24 +78,36 @@ export class TUI {
     try { process.stdin.setRawMode?.(true); } catch {}
     emitKeypressEvents(process.stdin);
     process.stdin.on('keypress', this.handleKeypress.bind(this));
-    process.stdout.on('resize', () => { this.updateSize(); this.redrawAll(); });
+    process.stdout.on('resize', () => { this.updateSize(); this.initScreen(); this.redrawAll(); });
     this.initScreen();
-    this.paintBar();
-    this.paintPrompt();
   }
 
   private updateSize(): void { this.rows = process.stdout.rows || 24; this.cols = Math.min(process.stdout.columns || 80, 120); }
   private get tw(): number { return this.cols; }
   private get tr(): number { return this.rows; }
+  private get scrollBottom(): number { return this.tr - 4; }
+  private get streamRow(): number { return this.tr - 3; }
+  private get barRow(): number { return this.tr - 2; }
+  private get promptRow(): number { return this.tr - 1; }
+
   private writeAt(row: number, text: string): void {
     if (row < 0 || row >= this.tr) return;
     cursorTo(process.stdout, 0, row);
-    clearLine(process.stdout, 0);
+    clearLine(process.stdout, 1);
     process.stdout.write(text.slice(0, this.tw));
+  }
+
+  private setScrollRegion(): void {
+    process.stdout.write(`\x1b[1;${this.tr - 3}r`);
+  }
+
+  private resetScrollRegion(): void {
+    process.stdout.write('\x1b[r');
   }
 
   private initScreen(): void {
     console.clear();
+    this.setScrollRegion();
     for (let i = 0; i < this.tr; i++) this.writeAt(i, '');
   }
 
@@ -104,75 +116,72 @@ export class TUI {
     const cfg = configManager.getConfig();
     const m = cfg.model.model; const ms = m.length > 20 ? m.slice(0, 18) + '…' : m;
     const p = configManager.getActiveProvider(); const ps = p.name.length > 10 ? p.name.slice(0, 8) + '…' : p.name;
-    let mb = ''; if (this.agentMode === 'plan') mb = chalk.blue(' plan'); else if (this.agentMode === 'goal') mb = chalk.magenta(' goal'); else if (this.agentMode === 'arena') mb = chalk.yellow(' arena');
+    let mb = '';
+    if (this.agentMode === 'plan') mb = chalk.blue(' plan');
+    else if (this.agentMode === 'goal') mb = chalk.magenta(' goal');
+    else if (this.agentMode === 'arena') mb = chalk.yellow(' arena');
     const left = `${s} ${chalk.cyan('ys')} ${chalk.yellow(ms)} ${chalk.gray(ps)}${mb}`;
     const right = `${chalk.gray(`${this.buf.length} msgs`)}`;
     return `${left}${' '.repeat(Math.max(0, this.tw - left.length - right.length - 2))}${right}`.slice(0, this.tw);
   }
 
   private paintBar(): void {
-    this.writeAt(this.tr - 2, this.statusBarText());
+    this.writeAt(this.barRow, this.statusBarText());
     if (this.popupActive) {
       const popupStr = this.commandPopup.render();
       if (popupStr) {
         const lines = popupStr.split('\n');
-        const startRow = Math.max(0, this.tr - 3 - lines.length);
+        const startRow = Math.max(0, this.scrollBottom + 1 - lines.length);
         for (let i = 0; i < lines.length && startRow + i < this.tr - 2; i++) {
           this.writeAt(startRow + i, lines[i]);
         }
       }
     }
   }
+
   private paintPrompt(): void {
     const p = this.buildPrefix();
     const i = this.inputBuffer || '';
     const c = chalk.gray('█');
     const line = this.cursorPos >= i.length ? p + i + c : p + i.slice(0, this.cursorPos) + c + i.slice(this.cursorPos);
-    this.writeAt(this.tr - 1, line.slice(0, this.tw));
+    this.writeAt(this.promptRow, line.slice(0, this.tw));
   }
+
   private buildPrefix(): string {
     const s = STATUS_COLORS[this.status](INDICATORS[this.status]);
     const cfg = configManager.getConfig();
     const m = cfg.model.model; const ms = m.length > 14 ? m.slice(0, 12) + '…' : m;
     const p = configManager.getActiveProvider(); const ps = p.name.length > 10 ? p.name.slice(0, 8) + '…' : p.name;
-    let mb = ''; if (this.agentMode === 'plan') mb = chalk.blue(' [plan]'); else if (this.agentMode === 'goal') mb = chalk.magenta(' [goal]');
+    let mb = '';
+    if (this.agentMode === 'plan') mb = chalk.blue(' [plan]');
+    else if (this.agentMode === 'goal') mb = chalk.magenta(' [goal]');
     return `${STATUS_COLORS[this.status](INDICATORS[this.status])} ${chalk.cyan('ys')} ${chalk.gray(`[${ms}]`)}${mb} ${chalk.gray('›')} `;
   }
-
-  // ──  Append-only output: write new text at bar row, then restore bar + prompt  ──
-  // This never touches old output lines (rows 0 .. tr-3), so no flicker.
 
   addOutput(text: string, type: string = 'normal'): void {
     const lines = text ? text.split('\n') : [''];
     for (const l of lines) this.buf.push({ text: l, type });
     if (this.buf.length > this.maxBuf) this.buf = this.buf.slice(-this.maxBuf);
     if (!process.stdout.isTTY || !this.running) return;
-
-    const r = this.tr;
-    // Write at the status-bar row (overwrites bar temporarily)
     for (const l of lines) {
-      this.writeAt(r - 2, styleForType(l, type));
+      cursorTo(process.stdout, 0, this.scrollBottom);
+      clearLine(process.stdout, 1);
+      process.stdout.write(styleForType(l, type).slice(0, this.tw));
       process.stdout.write('\n');
     }
-    // Restore bar + prompt
     this.paintBar();
     this.paintPrompt();
   }
-
-  // ──  Streaming: write content at the last output row (r-3), update in-place  ──
 
   writeStream(chunk: string): void {
     if (!this.running || !process.stdout.isTTY) return;
     this.streamActive = true;
     this.streamText += chunk;
-    const r = this.tr;
     const lines = this.streamText.split('\n');
-    const lastLines = lines.slice(-(r - 3));
-    // Write from row 1 up to r-3, then restore bar + prompt
-    for (let i = 0; i < Math.max(r - 3, lastLines.length); i++) {
-      if (i < lastLines.length) this.writeAt(i, lastLines[i]);
-      else this.writeAt(i, '');
-    }
+    const lastLine = lines[lines.length - 1];
+    cursorTo(process.stdout, 0, this.streamRow);
+    clearLine(process.stdout, 1);
+    process.stdout.write(chalk.gray(lastLine.slice(0, this.tw)));
     this.paintBar();
     this.paintPrompt();
   }
@@ -180,6 +189,7 @@ export class TUI {
   finalizeStream(): void {
     if (!this.streamActive) return;
     this.streamActive = false;
+    this.writeAt(this.streamRow, '');
     if (this.streamText) {
       for (const l of this.streamText.split('\n')) this.buf.push({ text: l, type: 'assistant' });
     }
@@ -190,11 +200,11 @@ export class TUI {
 
   private redrawAll(): void {
     if (!process.stdout.isTTY) return;
-    const r = this.tr;
-    const maxOut = Math.min(this.buf.length, r - 2);
+    const maxOut = Math.min(this.buf.length, this.scrollBottom + 1);
     const start = Math.max(0, this.buf.length - maxOut);
     for (let i = 0; i < maxOut; i++) this.writeAt(i, styleForType(this.buf[start + i].text, this.buf[start + i].type));
-    for (let i = maxOut; i < r - 2; i++) this.writeAt(i, '');
+    for (let i = maxOut; i <= this.scrollBottom; i++) this.writeAt(i, '');
+    this.writeAt(this.streamRow, '');
     this.paintBar();
     this.paintPrompt();
   }
@@ -247,24 +257,44 @@ export class TUI {
     this.addOutput(`└${'─'.repeat(w)}┘`, 'system');
   }
 
-  clear(): void { this.buf = []; this.streamActive = false; this.streamText = ''; console.clear(); this.initScreen(); this.paintBar(); this.paintPrompt(); }
-  stop(): void { this.running = false; this.stopSpinner(); process.stdin.removeAllListeners('keypress'); try { process.stdin.setRawMode?.(false); } catch {} cursorTo(process.stdout, 0, this.tr - 1); clearLine(process.stdout, 0); }
+  clear(): void {
+    this.buf = [];
+    this.streamActive = false;
+    this.streamText = '';
+    console.clear();
+    this.initScreen();
+    this.paintBar();
+    this.paintPrompt();
+  }
+
+  stop(): void {
+    this.running = false;
+    this.stopSpinner();
+    process.stdin.removeAllListeners('keypress');
+    try { process.stdin.setRawMode?.(false); } catch {}
+    this.resetScrollRegion();
+    cursorTo(process.stdout, 0, this.tr - 1);
+    clearLine(process.stdout, 1);
+  }
+
   destroy(): void { this.stop(); }
+
   private refreshUI(): void { if (!process.stdout.isTTY) return; this.paintBar(); this.paintPrompt(); }
   getOutputLineCount(): number { return this.buf.length; }
+
   private getSpinner(): string { return this.spinnerFrames[this.spinnerIdx % this.spinnerFrames.length]; }
+
   private startSpinner(): void {
     if (this.spinnerTimer) return;
     this.spinnerTimer = setInterval(() => {
       this.spinnerIdx++;
       if (!process.stdout.isTTY) return;
-      this.writeAt(this.tr - 2, this.statusBarText() + chalk.gray(` ${this.getSpinner()}`));
+      this.writeAt(this.barRow, this.statusBarText() + chalk.gray(` ${this.getSpinner()}`));
       this.paintPrompt();
     }, 120);
   }
-  private stopSpinner(): void { if (this.spinnerTimer) { clearInterval(this.spinnerTimer); this.spinnerTimer = null; } }
 
-  // ──  Key handling  ──
+  private stopSpinner(): void { if (this.spinnerTimer) { clearInterval(this.spinnerTimer); this.spinnerTimer = null; } }
 
   private async handleKeypress(str: string, key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean }): Promise<void> {
     if (!this.running) return;

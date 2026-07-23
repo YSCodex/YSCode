@@ -1,6 +1,6 @@
 {
   "name": "ys-code-agent",
-  "version": "4.0.1",
+  "version": "4.0.2",
   "description": "Production-grade AI Terminal Coding Assistant — Built for Termux, Engineered for Production. 50+ slash commands, multi-provider AI, git integration, autonomous mode, declarative tools, streaming agent core.",
   "main": "dist/cli/index.cjs",
   "type": "module",

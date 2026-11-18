@@ -1,0 +1,24 @@
+name: Bug report
+description: Something is broken or behaves wrongly
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you see instead? Screenshots or a short screen recording help a lot.
+    validations: { required: true }
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: diag
+    attributes:
+      label: Diagnostic report
+      description: In the app open Settings > About > "Copy diagnostic report" and paste it here (it contains no chats, code or keys).
+      render: text
+  - type: input
+    id: model
+    attributes:
+      label: AI model / provider used

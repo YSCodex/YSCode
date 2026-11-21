@@ -2,4 +2,3 @@ node_modules/
 .wrangler/
 .dev.vars
 *.log
-cloudflare/worker-configuration.d.ts

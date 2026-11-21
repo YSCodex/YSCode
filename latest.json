@@ -1,3 +1,11 @@
 {
-  "released": false
+  "released": true,
+  "versionName": "0.0.1",
+  "versionCode": 17,
+  "apkUrl": "https://github.com/YSCodex/YSCode/releases/download/v0.0.1/YSCode-0.0.1.apk",
+  "sha256": "3f88c70f230f38132303afa056d9ff2eafdd3ed354ea905059f3e373b2be8c91",
+  "size": 14669433,
+  "notes": "First public release.\n- AI coding agent with a real Linux environment (Alpine, Git, Python, Node) running inside the app. No account, no cloud backend.\n- Works with OpenAI-compatible, Anthropic and Gemini providers using your own API key.\n- Skills and MCP servers installable from GitHub, plus image viewing for vision models.\n- Local folder projects stay in sync with the folder you picked.\n- Open real device folders in place from your file manager (/sdcard works inside Linux), toolchain registry (JDK/Node on PATH), on-device APK analysis skill, and a Permissions screen.\n- Update checks, optional anonymous usage stats (off by default) and in-app feedback.\n\n",
+  "minVersionCode": 1,
+  "publishedAt": "2026-11-21T02:14:07Z"
 }

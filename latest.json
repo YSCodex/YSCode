@@ -1,11 +1,11 @@
 {
   "released": true,
-  "versionName": "0.0.2",
-  "versionCode": 38,
-  "apkUrl": "https://github.com/YSCodex/YSCode/releases/download/v0.0.2/YSCode-0.0.2.apk",
-  "sha256": "1b249134242786e0b6522e63f0f0188e23022b05f1b68db8f839c1cd92bf261a",
-  "size": 14824737,
-  "notes": "- Sign in with your ChatGPT plan (Codex): device-code login, several accounts, model list and usage bars. No API key needed.\n- Antigravity provider: Google's official Antigravity CLI runs inside YSCode's Linux, with live tool cards while it works.\n- In-app preview: the globe button in chat opens your local site (localhost); static sites are served automatically.\n- Smarter agent: higher step limits, softer budget nudges, fewer false loop stops.\n- More reliable Linux setup: git and ripgrep are installed automatically if missing; the harmless apk \"failed to write database\" warning no longer fails installs.\n- Fixes: crash when opening a project, setup Continue button during install, longer model names in the chip.\n- Polish: compact tool cards, accent navigation bar, cleaner activity heatmap (light and dark), one-line message box hint.\n\n",
+  "versionName": "0.0.3",
+  "versionCode": 40,
+  "apkUrl": "https://github.com/YSCodex/YSCode/releases/download/v0.0.3/YSCode-0.0.3.apk",
+  "sha256": "12494304578dbf201749011267d5f6ca6a8e1fa5c2f14eed247b6c3c52a66f20",
+  "size": 14826181,
+  "notes": "- Fix the \"JsonArray is not a JsonPrimitive\" error with some OpenAI-compatible providers (list or object content, reasoning and tool arguments).\n- Malformed streaming chunks from a provider are skipped instead of stopping the reply.\n\n",
   "minVersionCode": 1,
-  "publishedAt": "2026-11-25T03:09:03Z"
+  "publishedAt": "2026-11-25T08:22:55Z"
 }

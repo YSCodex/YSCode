@@ -89,7 +89,7 @@ fun ToolCard(
         tool.name == "bash" || tool.name == "bash_output" || tool.name == "kill_job" -> Icons.Outlined.Terminal
         tool.name in setOf("edit_file", "multi_edit", "write_file") -> Icons.Outlined.Edit
         tool.name in setOf("glob", "grep", "web_search") -> Icons.Outlined.Search
-        tool.name == "web_fetch" -> Icons.Outlined.Language
+        tool.name == "web_fetch" || tool.name == "browser" -> Icons.Outlined.Language
         tool.name == "repo_map" -> Icons.Outlined.AccountTree
         tool.name == "memory_write" -> Icons.Outlined.BookmarkAdded
         tool.name in setOf("task", "parallel_tasks") -> Icons.Outlined.Hub
@@ -171,6 +171,9 @@ fun ToolCard(
                 )
             }
 
+            val imagePath = remember(tool.fullOutput) { IMAGE_MARKER.find(tool.fullOutput)?.groupValues?.get(1) }
+            if (imagePath != null && tool.status != "running") ToolImagePreview(imagePath)
+
             AnimatedVisibility(visible = expanded) {
                 Column(
                     modifier = Modifier
@@ -186,7 +189,7 @@ fun ToolCard(
                             .padding(10.dp)
                     ) {
                         Text(
-                            text = tool.fullOutput.ifBlank { tool.argsPreview },
+                            text = tool.fullOutput.replace(IMAGE_MARKER, "").trim().ifBlank { tool.argsPreview },
                             fontFamily = JetBrainsMonoFontFamily,
                             fontSize = 12.sp,
                             color = colors.text

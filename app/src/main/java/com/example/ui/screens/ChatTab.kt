@@ -1032,7 +1032,7 @@ private fun AssistantTurnCard(
                 ),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            entry.reasoning?.let { r ->
+            entry.reasoning?.takeIf { it.isNotBlank() }?.let { r ->
                 ReasoningCard(
                     reasoning = r,
                     durationLabel = if (entry.reasoningDurationSec > 0) "Thought for ${entry.reasoningDurationSec}s" else "Reasoning"
@@ -1076,6 +1076,10 @@ private fun AssistantTurnCard(
 private fun ReasoningCard(reasoning: String, durationLabel: String) {
     val colors = LocalYSCodeColors.current
     var expanded by remember { mutableStateOf(false) }
+    // First heading or line of the thinking text, without markdown marks, as a one-line hint next to "Thought for 6s".
+    val preview = remember(reasoning) {
+        reasoning.lineSequence().map { it.trim().trim('*', '#', '_', ' ') }.firstOrNull { it.isNotBlank() }.orEmpty().take(70)
+    }
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = colors.surface,
@@ -1084,17 +1088,29 @@ private fun ReasoningCard(reasoning: String, durationLabel: String) {
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
                     Icon(Icons.Outlined.Psychology, null, tint = colors.info, modifier = Modifier.size(16.dp))
-                    Text(durationLabel, style = MaterialTheme.typography.labelMedium, color = colors.info)
+                    Text(durationLabel, style = MaterialTheme.typography.labelMedium, color = colors.info, maxLines = 1)
+                    if (!expanded && preview.isNotEmpty()) {
+                        Text(
+                            preview,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textDim,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
                 Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null, tint = colors.textDim, modifier = Modifier.size(18.dp))
             }
             AnimatedVisibility(visible = expanded) {
-                Text(
-                    text = reasoning,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.textDim,
+                com.example.ui.components.MarkdownText(
+                    markdown = reasoning.trim(),
                     modifier = Modifier.padding(top = 6.dp)
                 )
             }

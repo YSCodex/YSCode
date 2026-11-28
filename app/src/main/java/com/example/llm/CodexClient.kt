@@ -45,6 +45,7 @@ class CodexClient(private val auth: CodexAuth) : LlmClient {
 
     override fun stream(request: ChatRequest): Flow<LlmEvent> = flow {
         val body = buildBody(request).toString()
+        var reasoningStarted = false
         val calls = HashMap<String, String>()       // item id -> call id
         val names = HashMap<String, String>()       // call id -> tool name
         val args = HashMap<String, StringBuilder>() // call id -> arguments so far
@@ -86,7 +87,11 @@ class CodexClient(private val auth: CodexAuth) : LlmClient {
                             "response.output_text.delta" ->
                                 o["delta"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) emit(LlmEvent.TextDelta(it)) }
                             "response.reasoning_summary_text.delta", "response.reasoning_text.delta" ->
-                                o["delta"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) emit(LlmEvent.ReasoningDelta(it)) }
+                                o["delta"]?.jsonPrimitive?.contentOrNull?.let {
+                                    if (it.isNotEmpty()) { reasoningStarted = true; emit(LlmEvent.ReasoningDelta(it)) }
+                                }
+                            "response.reasoning_summary_part.added" ->
+                                if (reasoningStarted) emit(LlmEvent.ReasoningDelta("\n\n"))
                             "response.output_item.added" -> {
                                 val item = o["item"]?.jsonObject
                                 if (item?.get("type")?.jsonPrimitive?.contentOrNull == "function_call") {

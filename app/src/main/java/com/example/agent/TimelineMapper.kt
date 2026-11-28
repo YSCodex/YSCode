@@ -215,6 +215,8 @@ object TimelineMapper {
             "bash" -> str("command")?.take(90) ?: argsJson.take(90)
             "web_search" -> str("query")?.let { "\"$it\"" } ?: argsJson.take(90)
             "web_fetch" -> str("url")?.take(90) ?: argsJson.take(90)
+            "recall" -> str("query")?.take(80) ?: argsJson.take(80)
+            "browser" -> (str("action") ?: "browser") + (str("url")?.let { " ${it.take(70)}" } ?: str("selector")?.let { " ${it.take(50)}" } ?: str("index")?.let { " #$it" } ?: str("x")?.let { " $it,${str("y").orEmpty()}" } ?: str("key")?.let { " $it" } ?: "")
             "repo_map" -> str("path_prefix")?.let { "prefix: $it" } ?: "full repo"
             "ask_user" -> str("question")?.take(80) ?: "question"
             "exit_plan_mode" -> "Plan proposal"

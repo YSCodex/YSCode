@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.example.ui.YSCodeApp
+import com.example.util.ForegroundHost
 
 class MainActivity : ComponentActivity() {
     private val notificationPermission =
@@ -28,5 +29,20 @@ class MainActivity : ComponentActivity() {
         setContent {
             YSCodeApp(container = app.container)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        ForegroundHost.onResumed(this)
+    }
+
+    override fun onPause() {
+        ForegroundHost.onPaused(this)
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        ForegroundHost.onDestroyed(this)
+        super.onDestroy()
     }
 }

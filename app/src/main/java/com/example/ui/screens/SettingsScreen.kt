@@ -396,7 +396,7 @@ fun SettingsScreen(
                     SettingsSectionCard("Tools & Network Policy") {
                         SettingSwitchRow(
                             title = "Allow web_search & web_fetch tools",
-                            subtitle = "Built-in DuckDuckGo web_search + web_fetch URL reading into context",
+                            subtitle = "Built-in DuckDuckGo web_search, web_fetch URL reading and the agent browser",
                             checked = settings.allowWebFetch,
                             onCheckedChange = { c -> configViewModel.updateSettings { it.copy(allowWebFetch = c) } }
                         )

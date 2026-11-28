@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.4
+- **Agent browser:** the agent has its own headless Chromium browser (`browser` tool) to test web apps on localhost and read JavaScript pages: open, snapshot (numbered elements), click, type, tap, drag, key, hover, scroll, wait, eval, html, network, console, viewport (mobile, tablet, desktop), screenshot, reload, back, close.
+- **Screenshots you can see:** every browser screenshot is saved in your project (`screenshots/`) and shown in the chat. Tap it to enlarge, save to Gallery or share. Options: full page, one element, numbered boxes that match the snapshot indexes.
+- **Safe testing:** dry-run mode blocks form submits and POST/PUT/DELETE requests and lists what would have been sent; `forms`, `download_check` (status, size, SHA-256, APK signature; nothing is saved or installed) and `audit` (broken links, redirects, SEO notes).
+- **Better memory:** new `recall` tool searches the full chat history (and other chats of the project), so the agent finds exact earlier details instead of asking again. Compaction now keeps the previous summary in full, uses a structured summary, lists touched files and commands, and trims old messages less. The agent saves your preferences and decisions to memory right away.
+- Thinking card: Codex reasoning is formatted text, summary parts are separated, and a one-line hint shows what the agent was thinking.
+
 ## 0.0.3
 - Fix the "JsonArray is not a JsonPrimitive" error with some OpenAI-compatible providers (list or object content, reasoning and tool arguments).
 - Malformed streaming chunks from a provider are skipped instead of stopping the reply.

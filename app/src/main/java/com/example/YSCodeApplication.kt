@@ -135,6 +135,8 @@ class AppContainer(context: Context) {
             KillJobTool(),
             WebSearchTool(settingsStore),
             WebFetchTool(settingsStore),
+            com.example.tools.BrowserTool(appContext, settingsStore),
+            com.example.tools.RecallTool(database.messageDao(), database.sessionDao()),
             MemoryWriteTool(memoryManager),
             ToolchainTool(toolchainManager),
             TodoWriteTool(),

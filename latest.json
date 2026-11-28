@@ -1,11 +1,11 @@
 {
   "released": true,
-  "versionName": "0.0.3",
-  "versionCode": 40,
-  "apkUrl": "https://github.com/YSCodex/YSCode/releases/download/v0.0.3/YSCode-0.0.3.apk",
-  "sha256": "12494304578dbf201749011267d5f6ca6a8e1fa5c2f14eed247b6c3c52a66f20",
-  "size": 14826181,
-  "notes": "- Fix the \"JsonArray is not a JsonPrimitive\" error with some OpenAI-compatible providers (list or object content, reasoning and tool arguments).\n- Malformed streaming chunks from a provider are skipped instead of stopping the reply.\n\n",
+  "versionName": "0.0.4",
+  "versionCode": 46,
+  "apkUrl": "https://github.com/YSCodex/YSCode/releases/download/v0.0.4/YSCode-0.0.4.apk",
+  "sha256": "b02bb3a9d8b1246e37ead76228af69e51370aac32a907aa3347c680ad49122fe",
+  "size": 14922293,
+  "notes": "- **Agent browser:** the agent has its own headless Chromium browser (`browser` tool) to test web apps on localhost and read JavaScript pages: open, snapshot (numbered elements), click, type, tap, drag, key, hover, scroll, wait, eval, html, network, console, viewport (mobile, tablet, desktop), screenshot, reload, back, close.\n- **Screenshots you can see:** every browser screenshot is saved in your project (`screenshots/`) and shown in the chat. Tap it to enlarge, save to Gallery or share. Options: full page, one element, numbered boxes that match the snapshot indexes.\n- **Safe testing:** dry-run mode blocks form submits and POST/PUT/DELETE requests and lists what would have been sent; `forms`, `download_check` (status, size, SHA-256, APK signature; nothing is saved or installed) and `audit` (broken links, redirects, SEO notes).\n- **Better memory:** new `recall` tool searches the full chat history (and other chats of the project), so the agent finds exact earlier details instead of asking again. Compaction now keeps the previous summary in full, uses a structured summary, lists touched files and commands, and trims old messages less. The agent saves your preferences and decisions to memory right away.\n- Thinking card: Codex reasoning is formatted text, summary parts are separated, and a one-line hint shows what the agent was thinking.\n\n",
   "minVersionCode": 1,
-  "publishedAt": "2026-11-25T08:22:55Z"
+  "publishedAt": "2026-11-28T14:54:21Z"
 }
